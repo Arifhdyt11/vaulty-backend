@@ -123,3 +123,8 @@ type Answer struct {
 	Sources   []Note
 	FromNotes bool
 }
+
+// ChatTurn adalah satu pesan sebelumnya dalam percakapan dengan Vee (Role "user" atau "assistant").
+type ChatTurn struct {
+	Role, Content string
+}

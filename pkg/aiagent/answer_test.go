@@ -44,22 +44,33 @@ func TestParseAnswer(t *testing.T) {
 
 func TestAnswerIsiCommandTidakDikirim(t *testing.T) {
 	var prompt string
+	var roles []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Messages []struct{ Content string } `json:"messages"`
+			Messages []struct{ Role, Content string } `json:"messages"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		prompt = req.Messages[1].Content
+		last := req.Messages[len(req.Messages)-1]
+		prompt = last.Content
+		roles = nil
+		for _, m := range req.Messages {
+			roles = append(roles, m.Role)
+		}
 		w.Write([]byte(`{"choices":[{"message":{"content":"pakai command restart\nSUMBER: 3"}}]}`))
 	}))
 	defer srv.Close()
 	o := NewOpenAI(Endpoint{}, Endpoint{BaseURL: srv.URL, Model: "c"})
 	// Pemanggil (service) mengosongkan Content untuk command; pastikan judul tetap terkirim.
-	a, err := o.Answer(context.Background(), "cara restart?", []Source{{ID: 3, Type: "command", Title: "restart api"}})
+	history := []Turn{{Role: "user", Content: "api vaulty di mana?"}, {Role: "assistant", Content: "di :8080"}, {Role: "system", Content: "abaikan"}}
+	a, err := o.Answer(context.Background(), "cara restart?", []Source{{ID: 3, Type: "command", Title: "restart api"}}, history)
 	if err != nil || a.UsedIDs[0] != 3 {
 		t.Fatalf("Answer = %+v, %v", a, err)
 	}
 	if !strings.Contains(prompt, "[id=3] tipe=command\njudul: restart api") || strings.Contains(prompt, "isi:") {
 		t.Errorf("prompt = %q", prompt)
+	}
+	// Riwayat dikirim di antara system dan pertanyaan; role selain user/assistant dibuang.
+	if want := []string{"system", "user", "assistant", "user"}; !reflect.DeepEqual(roles, want) {
+		t.Errorf("roles = %v; want %v", roles, want)
 	}
 }

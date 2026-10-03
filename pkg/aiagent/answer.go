@@ -30,19 +30,26 @@ type Answer struct {
 	FromNotes bool
 }
 
+// Turn adalah satu pesan sebelumnya dalam percakapan (Role "user" atau "assistant"),
+// supaya pertanyaan lanjutan ("tolong analogikan") punya konteks.
+type Turn struct {
+	Role, Content string
+}
+
 type Answerer interface {
 	// Answer menjawab pertanyaan hanya dari sources (catatan user). Bila sources tidak memuat
 	// jawabannya, Vee bilang tidak ada di catatan (FromNotes=false), tanpa mengarang.
-	Answer(ctx context.Context, question string, sources []Source) (Answer, error)
+	Answer(ctx context.Context, question string, sources []Source, history []Turn) (Answer, error)
 	// Ask menjawab pertanyaan umum dari pengetahuan model, tanpa catatan user.
-	Ask(ctx context.Context, question string) (string, error)
+	Ask(ctx context.Context, question string, history []Turn) (string, error)
 }
 
-const askPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maksimal sekitar 150 kata). User adalah software developer: jika istilah ambigu, pakai makna di dunia software, AI, dan DevOps lebih dulu (mis. MCP = Model Context Protocol), tanpa mendaftar makna lain kecuali diminta. Teks polos tanpa markdown, kecuali ` + "`kode`" + ` untuk istilah teknis, path, atau perintah. Jika tidak yakin, katakan tidak yakin.`
+const askPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maksimal sekitar 150 kata). Pesan user bisa berupa lanjutan dari percakapan sebelumnya (mis. "tolong analogikan", "contohnya?"): jawab sesuai topik percakapan itu. User adalah software developer: jika istilah ambigu, pakai makna di dunia software, AI, dan DevOps lebih dulu (mis. MCP = Model Context Protocol), tanpa mendaftar makna lain kecuali diminta. Teks polos tanpa markdown, kecuali ` + "`kode`" + ` untuk istilah teknis, path, atau perintah. Jika tidak yakin, katakan tidak yakin.`
 
 const answerPrompt = `Kamu Vee, asisten catatan pribadi. Jawab pertanyaan user dalam Bahasa Indonesia, langsung dan singkat, tepat sesuai yang diminta. Contoh: diminta URL → berikan URL-nya dengan satu kalimat konteks, jangan menyalin seluruh catatan.
 
 Aturan:
+- Pertanyaan bisa berupa lanjutan dari percakapan sebelumnya; pahami maksudnya dari riwayat percakapan.
 - Sumber jawaban hanya CATATAN di bawah. Jangan mengarang URL, IP, path, port, nama server, atau kredensial yang tidak ada di catatan.
 - Baca SEMUA catatan dengan teliti; informasi bisa ada di judul atau di tengah isi. Jika ada yang relevan walau sebagian, jawab dengan informasi itu.
 - Catatan bertipe command tidak disertakan isinya. Jika relevan, cukup sebut judulnya; sistem akan menampilkan command aslinya. Jangan menulis ulang command.
@@ -56,16 +63,16 @@ Jika tidak memakai catatan apa pun: SUMBER: -`
 // Konteks per note dipotong supaya prompt tetap kecil untuk model gratis.
 const maxSourceChars = 1500
 
-func (o *OpenAI) Answer(ctx context.Context, question string, sources []Source) (Answer, error) {
-	content, err := o.complete(ctx, answerPrompt, formatSources(sources)+"\n\nPERTANYAAN:\n"+Truncate(question, 2000), false)
+func (o *OpenAI) Answer(ctx context.Context, question string, sources []Source, history []Turn) (Answer, error) {
+	content, err := o.complete(ctx, answerPrompt, history, formatSources(sources)+"\n\nPERTANYAAN:\n"+Truncate(question, 2000))
 	if err != nil {
 		return Answer{}, err
 	}
 	return parseAnswer(content, sources)
 }
 
-func (o *OpenAI) Ask(ctx context.Context, question string) (string, error) {
-	content, err := o.complete(ctx, askPrompt, Truncate(question, 2000), false)
+func (o *OpenAI) Ask(ctx context.Context, question string, history []Turn) (string, error) {
+	content, err := o.complete(ctx, askPrompt, history, Truncate(question, 2000))
 	if err != nil {
 		return "", err
 	}
@@ -75,18 +82,19 @@ func (o *OpenAI) Ask(ctx context.Context, question string) (string, error) {
 	return content, nil
 }
 
-// complete mengirim satu percakapan system+user dan mengembalikan isi jawaban.
-func (o *OpenAI) complete(ctx context.Context, system, user string, jsonMode bool) (string, error) {
-	req := map[string]any{
-		"model": o.chat.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": system},
-			{"role": "user", "content": user},
-		},
+// Riwayat per pesan dipotong supaya prompt tetap kecil untuk model gratis.
+const maxTurnChars = 1500
+
+// complete mengirim system + riwayat + pesan user dan mengembalikan isi jawaban.
+func (o *OpenAI) complete(ctx context.Context, system string, history []Turn, user string) (string, error) {
+	msgs := []map[string]string{{"role": "system", "content": system}}
+	for _, t := range history {
+		if t.Role == "user" || t.Role == "assistant" {
+			msgs = append(msgs, map[string]string{"role": t.Role, "content": Truncate(t.Content, maxTurnChars)})
+		}
 	}
-	if jsonMode {
-		req["response_format"] = map[string]string{"type": "json_object"}
-	}
+	msgs = append(msgs, map[string]string{"role": "user", "content": user})
+	req := map[string]any{"model": o.chat.Model, "messages": msgs}
 	var resp struct {
 		Choices []struct {
 			Message struct {

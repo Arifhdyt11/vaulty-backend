@@ -34,8 +34,8 @@ type Searcher interface {
 
 // Answerer dipenuhi *service.AnswerService.
 type Answerer interface {
-	Answer(ctx context.Context, userID int64, question string) (model.Answer, error)
-	Ask(ctx context.Context, question string) (string, error)
+	Answer(ctx context.Context, userID int64, question string, history []model.ChatTurn) (model.Answer, error)
+	Ask(ctx context.Context, question string, history []model.ChatTurn) (string, error)
 }
 
 type Auditor interface {
@@ -73,6 +73,16 @@ const (
 	modeAsk     = "ask"
 )
 
+// conversation: riwayat singkat per user supaya pertanyaan lanjutan ("tolong analogikan")
+// dipahami. Disimpan in-memory saja (hilang saat bot restart), tidak pernah di-log.
+type conversation struct {
+	turns []model.ChatTurn
+	mode  string // modeAsk atau modeNotes: jalur jawaban terakhir
+	at    time.Time
+}
+
+const modeNotes = "notes"
+
 type pending struct {
 	mode  string
 	until time.Time
@@ -89,13 +99,13 @@ type Bot struct {
 
 	mu      sync.Mutex
 	pending map[int64]pending // per ID Telegram
-	lastQ   map[int64]string  // pertanyaan terakhir, untuk tombol "Tanya AI umum"
+	convo   map[int64]*conversation
 	now     func() time.Time
 }
 
 func New(tg TelegramAPI, notes Notes, search Searcher, answers Answerer, audit Auditor, users map[int64]int64) *Bot {
 	return &Bot{tg: tg, notes: notes, search: search, answers: answers, audit: audit, users: users,
-		pending: map[int64]pending{}, lastQ: map[int64]string{}, now: time.Now}
+		pending: map[int64]pending{}, convo: map[int64]*conversation{}, now: time.Now}
 }
 
 const (
@@ -110,6 +120,9 @@ const (
 	maxListTitle     = 70
 	// Mode dari menu kedaluwarsa supaya pencarian beberapa jam kemudian tidak ikut tersimpan.
 	pendingTTL = 10 * time.Minute
+	// Percakapan dianggap selesai setelah 15 menit diam; maksimal 3 tanya-jawab terakhir.
+	convoTTL   = 15 * time.Minute
+	maxHistory = 6
 )
 
 const helpText = `<b>Vaulty</b> — simpan &amp; cari catatan.
@@ -258,7 +271,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 			b.setPending(m.From.ID, modeAsk)
 			return Reply{Text: "💬 Kirim pertanyaanmu.", Keyboard: cancelKeyboard}, true
 		}
-		return b.ask(ctx, arg), true
+		return b.ask(ctx, m.From.ID, arg), true
 	case "semua", "list":
 		return b.list(ctx, userID, 0, 1), true
 	default:
@@ -271,7 +284,7 @@ func (b *Bot) handleMode(ctx context.Context, tgID, userID int64, mode, text str
 	case modeFind:
 		return b.find(ctx, userID, text)
 	case modeAsk:
-		return b.ask(ctx, text)
+		return b.ask(ctx, tgID, text)
 	}
 	if mode == modeCommand {
 		desc, command, found := splitCommand(text)
@@ -292,6 +305,47 @@ func (b *Bot) setPending(tgID int64, mode string) {
 		return
 	}
 	b.pending[tgID] = pending{mode: mode, until: b.now().Add(pendingTTL)}
+}
+
+// history mengembalikan riwayat percakapan yang masih berlaku beserta jalur terakhirnya.
+func (b *Bot) history(tgID int64) ([]model.ChatTurn, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.convo[tgID]
+	if !ok || b.now().Sub(c.at) > convoTTL {
+		delete(b.convo, tgID)
+		return nil, ""
+	}
+	return append([]model.ChatTurn(nil), c.turns...), c.mode
+}
+
+func (b *Bot) remember(tgID int64, mode, q, answer string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.convo[tgID]
+	if !ok || b.now().Sub(c.at) > convoTTL {
+		c = &conversation{}
+		b.convo[tgID] = c
+	}
+	c.turns = append(c.turns, model.ChatTurn{Role: "user", Content: q}, model.ChatTurn{Role: "assistant", Content: answer})
+	if len(c.turns) > maxHistory {
+		c.turns = c.turns[len(c.turns)-maxHistory:]
+	}
+	c.mode, c.at = mode, b.now()
+}
+
+// popLastQuestion membuang tanya-jawab terakhir (jawaban "tidak ada di catatan") dan
+// mengembalikan pertanyaannya untuk diulang lewat Tanya AI.
+func (b *Bot) popLastQuestion(tgID int64) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.convo[tgID]
+	if !ok || b.now().Sub(c.at) > convoTTL || len(c.turns) < 2 {
+		return ""
+	}
+	q := c.turns[len(c.turns)-2].Content
+	c.turns = c.turns[:len(c.turns)-2]
+	return q
 }
 
 // takePending mengambil lalu menghapus mode yang masih berlaku.
@@ -361,14 +415,12 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 		}
 		return b.open(ctx, userID, id)
 	case "askq":
-		// Pertanyaan disimpan di memori karena callback_data dibatasi 64 byte.
-		b.mu.Lock()
-		q := b.lastQ[cq.From.ID]
-		b.mu.Unlock()
+		// Pertanyaan diambil dari riwayat karena callback_data dibatasi 64 byte.
+		q := b.popLastQuestion(cq.From.ID)
 		if q == "" {
 			return CallbackResult{Toast: "Pertanyaannya sudah kedaluwarsa, kirim ulang."}
 		}
-		r := b.ask(ctx, q)
+		r := b.ask(ctx, cq.From.ID, q)
 		return CallbackResult{Send: &r}
 	case "delno":
 		return CallbackResult{Toast: "Batal", Edit: &Reply{Text: "Batal menghapus."}}
@@ -464,16 +516,20 @@ func (b *Bot) answer(ctx context.Context, tgID, userID int64, q string) Reply {
 	if strings.TrimSpace(q) == "" {
 		return Reply{Text: helpText}
 	}
-	a, err := b.answers.Answer(ctx, userID, q)
+	history, mode := b.history(tgID)
+	a, err := b.answers.Answer(ctx, userID, q, history)
 	if err != nil {
 		slog.WarnContext(ctx, "vee gagal menjawab, pakai hasil cari", "err", err)
 		r := b.find(ctx, userID, q)
 		r.Text = "<i>Vee sedang tidak bisa menjawab, ini hasil carinya.</i>\n\n" + r.Text
 		return r
 	}
-	b.mu.Lock()
-	b.lastQ[tgID] = q
-	b.mu.Unlock()
+	// Lanjutan dari percakapan Tanya AI ("tolong analogikan") yang tidak ada di catatan
+	// diteruskan ke Tanya AI, supaya user tidak perlu menekan tombol lagi.
+	if !a.FromNotes && mode == modeAsk {
+		return b.ask(ctx, tgID, q)
+	}
+	b.remember(tgID, modeNotes, q, a.Text)
 
 	var sb strings.Builder
 	sb.WriteString("💬 " + formatAnswer(clip(a.Text, maxReply/2)))
@@ -493,15 +549,17 @@ func (b *Bot) answer(ctx context.Context, tgID, userID int64, q string) Reply {
 }
 
 // ask: pertanyaan umum ke AI. Ikon 💬 sudah menandai jawaban AI, jadi tanpa label tambahan.
-func (b *Bot) ask(ctx context.Context, q string) Reply {
+func (b *Bot) ask(ctx context.Context, tgID int64, q string) Reply {
 	if strings.TrimSpace(q) == "" {
 		return Reply{Text: "💬 Kirim pertanyaanmu, mis. <code>/tanya mcp adalah</code>."}
 	}
-	text, err := b.answers.Ask(ctx, q)
+	history, _ := b.history(tgID)
+	text, err := b.answers.Ask(ctx, q, history)
 	if err != nil {
 		slog.WarnContext(ctx, "tanya AI gagal", "err", err)
 		return Reply{Text: "❌ AI sedang tidak bisa dipakai. Coba lagi nanti."}
 	}
+	b.remember(tgID, modeAsk, q, text)
 	return Reply{Text: "💬 " + formatAnswer(clip(text, maxReply))}
 }
 

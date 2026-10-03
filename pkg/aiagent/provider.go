@@ -40,10 +40,10 @@ func (Disabled) Embed(context.Context, string) ([]float32, error)      { return 
 func (Disabled) SuggestTags(context.Context, string) ([]string, error) { return nil, nil }
 func (Disabled) Enabled() bool                                         { return false }
 func (Disabled) Model() string                                         { return "" }
-func (Disabled) Answer(context.Context, string, []Source) (Answer, error) {
+func (Disabled) Answer(context.Context, string, []Source, []Turn) (Answer, error) {
 	return Answer{}, ErrDisabled
 }
-func (Disabled) Ask(context.Context, string) (string, error) { return "", ErrDisabled }
+func (Disabled) Ask(context.Context, string, []Turn) (string, error) { return "", ErrDisabled }
 
 var nonTagChars = regexp.MustCompile(`[^a-z0-9\-]+`)
 

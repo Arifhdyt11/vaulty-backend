@@ -30,8 +30,17 @@ func NewAnswerService(search NoteSearcher, ai aiagent.Answerer) *AnswerService {
 const answerTopK = 8
 
 // Answer mencari catatan yang relevan lalu meminta LLM menjawab hanya dari catatan itu.
-func (s *AnswerService) Answer(ctx context.Context, userID int64, question string) (model.Answer, error) {
-	hits, _, err := s.search.Search(ctx, userID, searchQuery(question), model.NoteFilter{}, answerTopK)
+// history = percakapan sebelumnya; pertanyaan user terakhir ikut dipakai untuk pencarian
+// supaya pertanyaan lanjutan ("port-nya berapa?") tetap menemukan catatan yang sama.
+func (s *AnswerService) Answer(ctx context.Context, userID int64, question string, history []model.ChatTurn) (model.Answer, error) {
+	q := question
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			q = history[i].Content + " " + question
+			break
+		}
+	}
+	hits, _, err := s.search.Search(ctx, userID, searchQuery(q), model.NoteFilter{}, answerTopK)
 	if err != nil {
 		return model.Answer{}, fmt.Errorf("cari konteks jawaban: %w", err)
 	}
@@ -41,7 +50,7 @@ func (s *AnswerService) Answer(ctx context.Context, userID int64, question strin
 		byID[h.Note.ID] = h.Note
 		sources = append(sources, toSource(h.Note))
 	}
-	a, err := s.ai.Answer(ctx, question, sources)
+	a, err := s.ai.Answer(ctx, question, sources, turns(history))
 	if err != nil {
 		return model.Answer{}, fmt.Errorf("jawab pertanyaan: %w", err)
 	}
@@ -53,12 +62,20 @@ func (s *AnswerService) Answer(ctx context.Context, userID int64, question strin
 }
 
 // Ask: pertanyaan umum ke LLM, tanpa catatan user.
-func (s *AnswerService) Ask(ctx context.Context, question string) (string, error) {
-	text, err := s.ai.Ask(ctx, question)
+func (s *AnswerService) Ask(ctx context.Context, question string, history []model.ChatTurn) (string, error) {
+	text, err := s.ai.Ask(ctx, question, turns(history))
 	if err != nil {
 		return "", fmt.Errorf("tanya AI: %w", err)
 	}
 	return text, nil
+}
+
+func turns(history []model.ChatTurn) []aiagent.Turn {
+	out := make([]aiagent.Turn, len(history))
+	for i, h := range history {
+		out[i] = aiagent.Turn{Role: h.Role, Content: h.Content}
+	}
+	return out
 }
 
 func toSource(n model.Note) aiagent.Source {
@@ -98,7 +115,7 @@ func searchQuery(question string) string {
 	for _, w := range words {
 		w = strings.Trim(w, "-_./:")
 		if len(w) > 5 && strings.HasSuffix(w, "nya") {
-			w = strings.TrimSuffix(w, "nya") // databasenya → database
+			w = strings.TrimRight(strings.TrimSuffix(w, "nya"), "-") // databasenya → database, port-nya → port
 		}
 		if w != "" && !stopwords[w] {
 			kw = append(kw, w)

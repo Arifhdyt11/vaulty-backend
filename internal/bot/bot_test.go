@@ -84,21 +84,24 @@ func (f *fakeSearch) Search(_ context.Context, userID int64, q string, _ model.N
 }
 
 type fakeAnswers struct {
-	q, askQ string
-	resp    model.Answer
-	err     error
+	q, askQ  string
+	resp     model.Answer
+	err      error
+	history  []model.ChatTurn // riwayat pada panggilan terakhir
+	askCalls int
 }
 
-func (f *fakeAnswers) Answer(_ context.Context, userID int64, q string) (model.Answer, error) {
+func (f *fakeAnswers) Answer(_ context.Context, userID int64, q string, h []model.ChatTurn) (model.Answer, error) {
 	if userID != vaultID {
 		return model.Answer{}, errors.New("user salah")
 	}
-	f.q = q
+	f.q, f.history = q, h
 	return f.resp, f.err
 }
 
-func (f *fakeAnswers) Ask(_ context.Context, q string) (string, error) {
-	f.askQ = q
+func (f *fakeAnswers) Ask(_ context.Context, q string, h []model.ChatTurn) (string, error) {
+	f.askQ, f.history = q, h
+	f.askCalls++
 	return "MCP adalah `Model Context Protocol` <b>", f.err
 }
 
@@ -440,5 +443,54 @@ func TestVeeGagalJatuhKeCari(t *testing.T) {
 	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "nginx"))
 	if search.q != "nginx" || !strings.Contains(r.Text, "tidak bisa menjawab") || strings.Contains(r.Text, "quota") {
 		t.Errorf("fallback = %q (q=%q)", r.Text, search.q)
+	}
+}
+
+func TestLanjutanTanyaAIMemakaiRiwayat(t *testing.T) {
+	b, _, _, _ := newBot()
+	ans := b.answers.(*fakeAnswers)
+	ans.resp = model.Answer{Text: "Tidak ada di catatan."}
+	ctx := context.Background()
+
+	b.Handle(ctx, msg(tgArif, "private", "mcp adalah"))
+	b.HandleCallback(ctx, cb(tgArif, "askq"))
+	if len(ans.history) != 0 {
+		t.Fatalf("Tanya AI dari tombol tidak boleh membawa jawaban 'tidak ada di catatan': %+v", ans.history)
+	}
+
+	// Lanjutan: tidak ada di catatan + percakapan terakhir Tanya AI → diteruskan ke Ask dengan riwayat.
+	r, _ := b.Handle(ctx, msg(tgArif, "private", "ga ngerti tolong analogikan"))
+	if ans.askQ != "ga ngerti tolong analogikan" || ans.askCalls != 2 || !strings.HasPrefix(r.Text, "💬 MCP") {
+		t.Fatalf("lanjutan harus ke Ask: askQ=%q calls=%d text=%q", ans.askQ, ans.askCalls, r.Text)
+	}
+	if len(ans.history) != 2 || ans.history[0].Content != "mcp adalah" || ans.history[1].Role != "assistant" {
+		t.Errorf("riwayat = %+v", ans.history)
+	}
+}
+
+func TestRiwayatKedaluwarsa(t *testing.T) {
+	b, _, _, _ := newBot()
+	ans := b.answers.(*fakeAnswers)
+	now := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+	b.now = func() time.Time { return now }
+	ctx := context.Background()
+	b.Handle(ctx, msg(tgArif, "private", "/tanya mcp adalah"))
+	now = now.Add(convoTTL + time.Minute)
+	ans.resp = model.Answer{Text: "Tidak ada di catatan."}
+	b.Handle(ctx, msg(tgArif, "private", "tolong analogikan"))
+	if ans.askCalls != 1 || len(ans.history) != 0 {
+		t.Errorf("setelah kedaluwarsa harus mulai baru di jalur catatan: calls=%d history=%+v", ans.askCalls, ans.history)
+	}
+}
+
+func TestRiwayatDibatasi(t *testing.T) {
+	b, _, _, _ := newBot()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		b.Handle(ctx, msg(tgArif, "private", fmt.Sprintf("/tanya q%d", i)))
+	}
+	h, mode := b.history(tgArif)
+	if len(h) != maxHistory || h[0].Content != "q2" || mode != modeAsk {
+		t.Errorf("history = %+v mode=%q", h, mode)
 	}
 }
