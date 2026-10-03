@@ -16,13 +16,20 @@ func TestParseAnswer(t *testing.T) {
 		name, content string
 		want          Answer
 	}{
-		{"json", `{"answer":"Buka http://x:20128","used_ids":[10],"from_notes":true}`,
-			Answer{Text: "Buka http://x:20128", UsedIDs: []int64{10}, FromNotes: true}},
-		{"code fence + id string + id asing dibuang", "```json\n{\"answer\":\"a\",\"used_ids\":[\"12\",99,12]}\n```",
+		{"format sumber", "URL 9router: `http://x:20128`.\nSUMBER: 10",
+			Answer{Text: "URL 9router: `http://x:20128`.", UsedIDs: []int64{10}, FromNotes: true}},
+		{"sumber bold + id asing dibuang", "Pakai command restart.\n\n**Sumber:** 12, 99, 12",
+			Answer{Text: "Pakai command restart.", UsedIDs: []int64{12}, FromNotes: true}},
+		{"sumber menempel di kalimat", "Database memakai PostgreSQL 17. SUMBER: 13, 10",
+			Answer{Text: "Database memakai PostgreSQL 17.", UsedIDs: []int64{10}, FromNotes: true}},
+		{"kata sumber di tengah tidak dipotong", "Sumber: data ada di catatan 10.\nSUMBER: 10",
+			Answer{Text: "Sumber: data ada di catatan 10.", UsedIDs: []int64{10}, FromNotes: true}},
+		{"tanpa sumber", "Tidak ada di catatanmu.\nSUMBER: -", Answer{Text: "Tidak ada di catatanmu."}},
+		{"json lama", "```json\n{\"answer\":\"a\",\"used_ids\":[\"12\"]}\n```",
 			Answer{Text: "a", UsedIDs: []int64{12}, FromNotes: true}},
-		{"tidak ada di catatan", `{"answer":"Tidak ada di catatanmu.","used_ids":[],"from_notes":false}`,
-			Answer{Text: "Tidak ada di catatanmu."}},
-		{"bukan json", "MCP adalah protokol.", Answer{Text: "MCP adalah protokol."}},
+		{"sisa json di kalimat", "Hal itu tidak ada di catatan. used_ids: []. from_notes: false.",
+			Answer{Text: "Hal itu tidak ada di catatan."}},
+		{"bukan format apa pun", "MCP adalah protokol.", Answer{Text: "MCP adalah protokol."}},
 	}
 	for _, c := range cases {
 		got, err := parseAnswer(c.content, src)
@@ -30,7 +37,7 @@ func TestParseAnswer(t *testing.T) {
 			t.Errorf("%s: parseAnswer = %+v, %v; want %+v", c.name, got, err, c.want)
 		}
 	}
-	if _, err := parseAnswer("  ", src); err == nil {
+	if _, err := parseAnswer("SUMBER: 10", src); err == nil {
 		t.Error("jawaban kosong harus error")
 	}
 }
@@ -43,7 +50,7 @@ func TestAnswerIsiCommandTidakDikirim(t *testing.T) {
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		prompt = req.Messages[1].Content
-		w.Write([]byte(`{"choices":[{"message":{"content":"{\"answer\":\"pakai command restart\",\"used_ids\":[3]}"}}]}`))
+		w.Write([]byte(`{"choices":[{"message":{"content":"pakai command restart\nSUMBER: 3"}}]}`))
 	}))
 	defer srv.Close()
 	o := NewOpenAI(Endpoint{}, Endpoint{BaseURL: srv.URL, Model: "c"})

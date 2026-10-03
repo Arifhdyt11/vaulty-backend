@@ -51,3 +51,18 @@ func TestAnswerServiceCommandTidakDikirimKeLLM(t *testing.T) {
 		t.Errorf("answer = %+v", a)
 	}
 }
+
+func TestSearchQuery(t *testing.T) {
+	cases := map[string]string{
+		"database sipantas apa":                  "database or sipantas",
+		"berikan saya url untuk membuka 9router": "url or membuka or 9router",
+		"di sipantas databasenya apa?":           "sipantas or database",
+		"apa":                                    "apa",
+		"cara restart docker-compose di ~/apps":  "restart or docker-compose or apps",
+	}
+	for in, want := range cases {
+		if got := searchQuery(in); got != want {
+			t.Errorf("searchQuery(%q) = %q; want %q", in, got, want)
+		}
+	}
+}

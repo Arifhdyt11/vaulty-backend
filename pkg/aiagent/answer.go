@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -42,19 +43,21 @@ const askPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa 
 const answerPrompt = `Kamu Vee, asisten catatan pribadi. Jawab pertanyaan user dalam Bahasa Indonesia, langsung dan singkat, tepat sesuai yang diminta. Contoh: diminta URL → berikan URL-nya dengan satu kalimat konteks, jangan menyalin seluruh catatan.
 
 Aturan:
-- Sumber utama adalah CATATAN di bawah. Jangan mengarang URL, IP, path, port, nama server, atau kredensial yang tidak ada di catatan.
-- Catatan bertipe command tidak disertakan isinya. Jika relevan, cukup sebut judulnya dan masukkan id-nya ke used_ids; sistem akan menampilkan command aslinya. Jangan menulis ulang command dari catatan.
-- Jika catatan tidak memuat jawabannya, jawab singkat bahwa hal itu tidak ada di catatan, used_ids kosong, from_notes false. Jangan menjawab dari pengetahuan umum.
+- Sumber jawaban hanya CATATAN di bawah. Jangan mengarang URL, IP, path, port, nama server, atau kredensial yang tidak ada di catatan.
+- Baca SEMUA catatan dengan teliti; informasi bisa ada di judul atau di tengah isi. Jika ada yang relevan walau sebagian, jawab dengan informasi itu.
+- Catatan bertipe command tidak disertakan isinya. Jika relevan, cukup sebut judulnya; sistem akan menampilkan command aslinya. Jangan menulis ulang command.
+- Jika catatan benar-benar tidak memuat jawabannya, tulis singkat bahwa hal itu tidak ada di catatan. Jangan menjawab dari pengetahuan umum.
 - Teks polos tanpa markdown, kecuali ` + "`kode`" + ` untuk URL, path, atau perintah.
-- used_ids: id catatan yang benar-benar kamu pakai (boleh kosong).
 
-Balas HANYA JSON: {"answer": "...", "used_ids": [1, 2], "from_notes": true}`
+Format balasan WAJIB: jawaban, lalu baris terakhir berisi id catatan yang kamu pakai:
+SUMBER: 10, 12
+Jika tidak memakai catatan apa pun: SUMBER: -`
 
 // Konteks per note dipotong supaya prompt tetap kecil untuk model gratis.
 const maxSourceChars = 1500
 
 func (o *OpenAI) Answer(ctx context.Context, question string, sources []Source) (Answer, error) {
-	content, err := o.complete(ctx, answerPrompt, formatSources(sources)+"\n\nPERTANYAAN:\n"+Truncate(question, 2000), true)
+	content, err := o.complete(ctx, answerPrompt, formatSources(sources)+"\n\nPERTANYAAN:\n"+Truncate(question, 2000), false)
 	if err != nil {
 		return Answer{}, err
 	}
@@ -121,38 +124,53 @@ func formatSources(sources []Source) string {
 	return sb.String()
 }
 
-// parseAnswer toleran: jika model tidak membalas JSON, seluruh teks dipakai sebagai jawaban.
-// ID yang tidak ada di sources dibuang supaya LLM tidak bisa merujuk note lain.
+var (
+	// "SUMBER: 10, 12" di akhir jawaban, di baris sendiri atau menempel di kalimat terakhir.
+	sourceLine = regexp.MustCompile(`(?i)[\s(]*\**\s*sumber\s*\**\s*:\s*\**\s*([-\d,\s]*?)\s*[).]?\s*$`)
+	digits     = regexp.MustCompile(`\d+`)
+	// Sisa format JSON yang kadang tetap ditulis model lewat Hermes.
+	jsonLeftover = regexp.MustCompile(`(?i)[\s,;]*(used_ids|from_notes)\s*:.*$`)
+)
+
+// parseAnswer membaca "jawaban + SUMBER: id, id". Tetap menerima JSON {answer, used_ids}
+// dari model yang mengabaikan format. ID yang tidak ada di sources dibuang supaya LLM tidak
+// bisa merujuk note lain.
 func parseAnswer(content string, sources []Source) (Answer, error) {
-	var out struct {
-		Answer    string            `json:"answer"`
-		UsedIDs   []json.RawMessage `json:"used_ids"`
-		FromNotes *bool             `json:"from_notes"`
+	text, ids := strings.TrimSpace(content), []string{}
+	var js struct {
+		Answer  string            `json:"answer"`
+		UsedIDs []json.RawMessage `json:"used_ids"`
 	}
-	if err := json.Unmarshal([]byte(jsonObject(content)), &out); err != nil || strings.TrimSpace(out.Answer) == "" {
-		text := strings.TrimSpace(content)
-		if text == "" {
-			return Answer{}, fmt.Errorf("openai chat: jawaban kosong")
+	if strings.HasPrefix(strings.TrimPrefix(text, "```json"), "{") || strings.HasPrefix(text, "```") {
+		if err := json.Unmarshal([]byte(jsonObject(text)), &js); err == nil && strings.TrimSpace(js.Answer) != "" {
+			text = js.Answer
+			for _, raw := range js.UsedIDs {
+				ids = append(ids, strings.Trim(string(raw), `"`))
+			}
 		}
-		return Answer{Text: text}, nil
 	}
+	if m := sourceLine.FindStringSubmatchIndex(text); m != nil {
+		ids = append(ids, digits.FindAllString(text[m[2]:m[3]], -1)...)
+		text = text[:m[0]]
+	}
+	text = strings.TrimSpace(jsonLeftover.ReplaceAllString(strings.TrimSpace(text), ""))
+	if text == "" {
+		return Answer{}, fmt.Errorf("openai chat: jawaban kosong")
+	}
+
 	known := make(map[int64]bool, len(sources))
 	for _, s := range sources {
 		known[s.ID] = true
 	}
-	a := Answer{Text: strings.TrimSpace(out.Answer)}
+	a := Answer{Text: text}
 	seen := map[int64]bool{}
-	for _, raw := range out.UsedIDs {
-		// Model kadang mengirim id sebagai string ("12").
-		id, err := strconv.ParseInt(strings.Trim(string(raw), `"`), 10, 64)
+	for _, raw := range ids {
+		id, err := strconv.ParseInt(raw, 10, 64)
 		if err == nil && known[id] && !seen[id] {
 			seen[id] = true
 			a.UsedIDs = append(a.UsedIDs, id)
 		}
 	}
 	a.FromNotes = len(a.UsedIDs) > 0
-	if out.FromNotes != nil {
-		a.FromNotes = *out.FromNotes && len(sources) > 0
-	}
 	return a, nil
 }

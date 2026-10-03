@@ -487,7 +487,7 @@ func (b *Bot) answer(ctx context.Context, tgID, userID int64, q string) Reply {
 		}
 	}
 	if !a.FromNotes {
-		kb = append(kb, []telegram.Button{{Text: "💬 Tanya AI umum", CallbackData: "askq"}})
+		kb = append(kb, []telegram.Button{{Text: "💬 Tanya AI", CallbackData: "askq"}})
 	}
 	return Reply{Text: sb.String(), Keyboard: kb}
 }
