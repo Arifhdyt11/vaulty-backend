@@ -1,6 +1,6 @@
 # Vaulty Backend (vaulty-api)
 
-API + worker Vaulty (Personal Knowledge Assistant). Satu codebase, tiga binary: `cmd/api`, `cmd/worker`, `cmd/migrate` (ADR-001).
+API + worker Vaulty (Personal Knowledge Assistant). Satu codebase, empat binary: `cmd/api`, `cmd/worker`, `cmd/migrate`, `cmd/bot` (bot Telegram, ADR-021) (ADR-001).
 
 ## Stack
 - Go 1.26, Gin + **huma v2** (validasi input & OpenAPI 3.1 dari kode)

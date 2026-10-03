@@ -43,6 +43,10 @@ type Config struct {
 	SearchRelativeMargin float64
 
 	WorkerConcurrency int
+
+	// Bot Telegram (cmd/bot, ADR-021). TelegramUsers: ID Telegram -> email akun Vaulty.
+	TelegramBotToken string
+	TelegramUsers    map[int64]string
 }
 
 // AIEnabled: provider AI dianggap aktif jika OPENAI_API_KEY diisi (untuk Ollama cukup isi "ollama").
@@ -74,7 +78,14 @@ func Load() (Config, error) {
 		SearchRelativeMargin: getFloat("SEARCH_RELATIVE_MARGIN", 0.08),
 
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 5),
+
+		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 	}
+	users, err := telegramUsers(os.Getenv("TELEGRAM_USERS"))
+	if err != nil {
+		return c, err
+	}
+	c.TelegramUsers = users
 	// Tanpa override, embedding memakai server yang sama dengan chat (setup Ollama/OpenAI biasa).
 	c.OpenAIEmbeddingAPIKey = get("OPENAI_EMBEDDING_API_KEY", c.OpenAIAPIKey)
 	c.OpenAIEmbeddingBaseURL = strings.TrimRight(get("OPENAI_EMBEDDING_BASE_URL", c.OpenAIBaseURL), "/")
@@ -117,6 +128,20 @@ func getDuration(key string, def time.Duration) time.Duration {
 		return v
 	}
 	return def
+}
+
+// telegramUsers mem-parse "123456:a@b.com,789:c@d.com" (ID Telegram : email Vaulty).
+func telegramUsers(v string) (map[int64]string, error) {
+	out := map[int64]string{}
+	for _, pair := range list(v) {
+		id, email, ok := strings.Cut(pair, ":")
+		n, err := strconv.ParseInt(strings.TrimSpace(id), 10, 64)
+		if !ok || err != nil || strings.TrimSpace(email) == "" {
+			return nil, fmt.Errorf("TELEGRAM_USERS tidak valid (format <id_telegram>:<email>): %q", pair)
+		}
+		out[n] = strings.ToLower(strings.TrimSpace(email))
+	}
+	return out, nil
 }
 
 func list(v string) []string {

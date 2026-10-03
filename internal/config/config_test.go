@@ -38,3 +38,15 @@ func TestLoadEmbeddingEndpoint(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramUsers(t *testing.T) {
+	got, err := telegramUsers(" 111:Arif@Mail.com , 222:b@x.id")
+	if err != nil || len(got) != 2 || got[111] != "arif@mail.com" || got[222] != "b@x.id" {
+		t.Fatalf("telegramUsers = %v, %v", got, err)
+	}
+	for _, bad := range []string{"abc:a@b.com", "111", "111:"} {
+		if _, err := telegramUsers(bad); err == nil {
+			t.Errorf("telegramUsers(%q) harus error", bad)
+		}
+	}
+}

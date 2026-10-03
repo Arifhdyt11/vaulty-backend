@@ -1,0 +1,9 @@
+# Jangan kirim secret, data lokal, dan artefak ke build context.
+.env
+.env.*
+!.env.example
+storage/
+bin/
+.git/
+.claude/
+*.local.*

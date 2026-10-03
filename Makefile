@@ -1,4 +1,4 @@
-.PHONY: dev-deps migrate api worker sqlc test build tunnel
+.PHONY: dev-deps migrate api worker bot sqlc test build tunnel
 
 dev-deps: ## Jalankan Postgres (pgvector) untuk development
 	docker compose -f docker-compose.dev.yml up -d
@@ -14,6 +14,9 @@ api:
 
 worker:
 	go run ./cmd/worker
+
+bot: ## Bot Telegram (butuh TELEGRAM_BOT_TOKEN)
+	go run ./cmd/bot
 
 sqlc: ## Generate ulang kode query dari db/queries
 	go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate
