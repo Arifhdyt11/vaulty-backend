@@ -21,10 +21,12 @@ func ToHTTPError(err error) error {
 		return huma.Error401Unauthorized(firstLine(err))
 	case errors.Is(err, model.ErrRegistrationClosed), errors.Is(err, model.ErrEmailUnverified):
 		return huma.Error403Forbidden(err.Error())
-	case errors.Is(err, model.ErrEmailTaken):
+	case errors.Is(err, model.ErrEmailTaken), errors.Is(err, model.ErrReminderInvalid):
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, model.ErrInvalidEmail), errors.Is(err, model.ErrWeakPassword),
-		errors.Is(err, model.ErrInvalidType), errors.Is(err, model.ErrBlockedType), errors.Is(err, model.ErrEmptyNote):
+		errors.Is(err, model.ErrInvalidType), errors.Is(err, model.ErrBlockedType), errors.Is(err, model.ErrEmptyNote),
+		errors.Is(err, model.ErrEmptyReminder), errors.Is(err, model.ErrReminderPast), errors.Is(err, model.ErrInvalidRepeat),
+		errors.Is(err, model.ErrInvalidLead), errors.Is(err, model.ErrReminderTooFar):
 		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, model.ErrGoogleDisabled):
 		return huma.Error503ServiceUnavailable(err.Error())

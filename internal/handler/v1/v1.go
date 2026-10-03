@@ -12,6 +12,7 @@ type Services struct {
 	Audit          *service.AuditService
 	Note           *service.NoteService
 	Search         *service.SearchService
+	Reminder       *service.ReminderService
 	MaxUploadBytes int64
 }
 
@@ -20,4 +21,5 @@ func Register(api huma.API, s Services) {
 	NewAuthHandler(s.Auth, s.Audit).Register(api)
 	NewNoteHandler(s.Note, s.Audit, s.MaxUploadBytes).Register(api)
 	NewSearchHandler(s.Search).Register(api)
+	NewReminderHandler(s.Reminder, s.Audit).Register(api)
 }

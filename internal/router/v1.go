@@ -14,6 +14,7 @@ func (r *Router) v1() {
 		Audit:          r.services.Audit,
 		Note:           r.services.Note,
 		Search:         r.services.Search,
+		Reminder:       r.services.Reminder,
 		MaxUploadBytes: r.cfg.MaxUploadBytes,
 	})
 }

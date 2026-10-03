@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // EmbeddingDims harus sama dengan kolom notes.embedding vector(1536).
@@ -31,6 +32,7 @@ type Provider interface {
 	Embedder
 	Tagger
 	Answerer
+	ReminderParser
 }
 
 // Disabled dipakai jika OPENAI_API_KEY kosong: search jadi full-text saja, auto-tag dilewati.
@@ -44,6 +46,14 @@ func (Disabled) Answer(context.Context, string, []Source, []Turn) (Answer, error
 	return Answer{}, ErrDisabled
 }
 func (Disabled) Ask(context.Context, string, []Turn) (string, error) { return "", ErrDisabled }
+
+// ParseReminder tanpa AI tetap memahami waktu relatif ("30 menit lagi").
+func (Disabled) ParseReminder(_ context.Context, text string, now time.Time) (ReminderDraft, error) {
+	if d, ok := ParseRelative(text, now); ok {
+		return d, nil
+	}
+	return ReminderDraft{}, ErrDisabled
+}
 
 var nonTagChars = regexp.MustCompile(`[^a-z0-9\-]+`)
 

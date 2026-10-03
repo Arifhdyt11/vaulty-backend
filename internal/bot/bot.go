@@ -18,6 +18,7 @@ import (
 
 	"vaulty-api/internal/model"
 	"vaulty-api/internal/repository"
+	"vaulty-api/pkg/aiagent"
 	"vaulty-api/pkg/telegram"
 )
 
@@ -89,23 +90,40 @@ type pending struct {
 }
 
 type Bot struct {
-	tg      TelegramAPI
-	notes   Notes
-	search  Searcher
-	answers Answerer
-	audit   Auditor
+	tg        TelegramAPI
+	notes     Notes
+	search    Searcher
+	answers   Answerer
+	reminders Reminders
+	parser    aiagent.ReminderParser
+	audit     Auditor
 	// users memetakan ID Telegram ke user_id Vaulty. Hanya akun di sini yang dilayani.
 	users map[int64]int64
 
 	mu      sync.Mutex
 	pending map[int64]pending // per ID Telegram
 	convo   map[int64]*conversation
+	drafts  map[int64]*draft
 	now     func() time.Time
 }
 
-func New(tg TelegramAPI, notes Notes, search Searcher, answers Answerer, audit Auditor, users map[int64]int64) *Bot {
-	return &Bot{tg: tg, notes: notes, search: search, answers: answers, audit: audit, users: users,
-		pending: map[int64]pending{}, convo: map[int64]*conversation{}, now: time.Now}
+// Deps adalah dependensi bot.
+type Deps struct {
+	TG        TelegramAPI
+	Notes     Notes
+	Search    Searcher
+	Answers   Answerer
+	Reminders Reminders
+	Parser    aiagent.ReminderParser
+	Audit     Auditor
+	// Users memetakan ID Telegram ke user_id Vaulty (bootstrap.TelegramUsers).
+	Users map[int64]int64
+}
+
+func New(d Deps) *Bot {
+	return &Bot{tg: d.TG, notes: d.Notes, search: d.Search, answers: d.Answers, reminders: d.Reminders,
+		parser: d.Parser, audit: d.Audit, users: d.Users,
+		pending: map[int64]pending{}, convo: map[int64]*conversation{}, drafts: map[int64]*draft{}, now: time.Now}
 }
 
 const (
@@ -134,6 +152,8 @@ Teks biasa = <b>Vee menjawab dari catatanmu</b> (mis. "url 9router apa?").
 /create_cmd &lt;deskripsi&gt; | &lt;command&gt; — simpan command, ditampilkan apa adanya
 /cari &lt;kata kunci&gt; — daftar catatan yang cocok
 /tanya &lt;pertanyaan&gt; — tanya AI umum (bukan dari catatan)
+/ingatkan &lt;kapan&gt; &lt;apa&gt; — buat reminder (atau ketik "ingatkan ...")
+/reminder — daftar reminder aktif
 /semua — tampilkan semua catatan
 /help — bantuan ini`
 
@@ -145,6 +165,8 @@ var menuCommands = []telegram.Command{
 	{Command: "tanya", Description: "Tanya AI umum: /tanya mcp adalah"},
 	{Command: "cari", Description: "Daftar catatan yang cocok: /cari <kata kunci>"},
 	{Command: "semua", Description: "Tampilkan semua catatan"},
+	{Command: "ingatkan", Description: "Buat reminder: /ingatkan besok jam 9 follow up client"},
+	{Command: "reminder", Description: "Daftar reminder aktif"},
 	{Command: "help", Description: "Bantuan"},
 }
 
@@ -153,7 +175,7 @@ var menuReply = Reply{
 	Keyboard: telegram.Keyboard{
 		{{Text: "📝 Simpan catatan", CallbackData: "mode:" + modeNote}, {Text: "⌨️ Simpan command", CallbackData: "mode:" + modeCommand}},
 		{{Text: "💬 Tanya AI", CallbackData: "mode:" + modeAsk}, {Text: "🔎 Cari", CallbackData: "mode:" + modeFind}},
-		{{Text: "📚 Semua catatan", CallbackData: "list:0:1"}},
+		{{Text: "📚 Semua catatan", CallbackData: "list:0:1"}, {Text: "⏰ Reminder", CallbackData: "rmenu"}},
 	},
 }
 
@@ -242,6 +264,9 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 		if mode := b.takePending(m.From.ID); mode != "" {
 			return b.handleMode(ctx, m.From.ID, userID, mode, arg), true
 		}
+		if reminderTrigger.MatchString(arg) {
+			return b.startReminder(ctx, m.From.ID, arg), true
+		}
 		return b.answer(ctx, m.From.ID, userID, arg), true
 	}
 	// Perintah "/..." membatalkan mode dari menu.
@@ -274,6 +299,14 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 		return b.ask(ctx, m.From.ID, arg), true
 	case "semua", "list":
 		return b.list(ctx, userID, 0, 1), true
+	case "ingatkan", "remind":
+		if arg == "" {
+			b.setPending(m.From.ID, modeRemind)
+			return Reply{Text: remindPrompt, Keyboard: cancelKeyboard}, true
+		}
+		return b.startReminder(ctx, m.From.ID, arg), true
+	case "reminder", "reminders":
+		return b.listReminders(ctx, userID), true
 	default:
 		return Reply{Text: "Perintah tidak dikenal. Kirim /help."}, true
 	}
@@ -281,6 +314,8 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 
 func (b *Bot) handleMode(ctx context.Context, tgID, userID int64, mode, text string) Reply {
 	switch mode {
+	case modeRemind:
+		return b.startReminder(ctx, tgID, text)
 	case modeFind:
 		return b.find(ctx, userID, text)
 	case modeAsk:
@@ -370,6 +405,9 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 		return CallbackResult{Toast: "Akun Telegram ini belum terhubung ke Vaulty."}
 	}
 	action, arg, _ := strings.Cut(cq.Data, ":")
+	if res, ok := b.handleReminderCallback(ctx, cq.From.ID, userID, action, arg); ok {
+		return res
+	}
 	switch action {
 	case "mode":
 		switch arg {
@@ -382,6 +420,9 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 		case modeFind:
 			b.setPending(cq.From.ID, modeFind)
 			return CallbackResult{Edit: &Reply{Text: "🔎 Kirim kata kunci yang mau dicari.", Keyboard: cancelKeyboard}}
+		case modeRemind:
+			b.setPending(cq.From.ID, modeRemind)
+			return CallbackResult{Edit: &Reply{Text: remindPrompt, Keyboard: cancelKeyboard}}
 		case modeAsk:
 			b.setPending(cq.From.ID, modeAsk)
 			return CallbackResult{Edit: &Reply{Text: "💬 Kirim pertanyaanmu, mis. <i>mcp adalah</i>.", Keyboard: cancelKeyboard}}

@@ -1,5 +1,5 @@
 // Command worker menjalankan task asynq: indexing note (ekstraksi, auto-tag, embedding),
-// safety net, dan pembersihan session.
+// safety net, pembersihan session, dan pengiriman reminder ke Telegram.
 package main
 
 import (
@@ -12,12 +12,14 @@ import (
 	"github.com/hibiken/asynq"
 
 	"vaulty-api/internal/bootstrap"
+	"vaulty-api/internal/bot"
 	"vaulty-api/internal/database"
 	"vaulty-api/internal/repository"
 	"vaulty-api/internal/repository/queries"
 	"vaulty-api/internal/service"
 	"vaulty-api/internal/worker"
 	"vaulty-api/pkg/storage"
+	"vaulty-api/pkg/telegram"
 )
 
 func main() {
@@ -47,7 +49,16 @@ func main() {
 	indexSvc := service.NewIndexService(noteRepo, store, ai, ai, worker.NewEnqueuer(queue))
 	authSvc := service.NewAuthService(repository.NewUserRepository(q), repository.NewSessionRepository(q), nil, service.AuthConfig{})
 
-	w, err := worker.New(redis, cfg.WorkerConcurrency, indexSvc, authSvc)
+	reminderSvc := service.NewReminderService(repository.NewReminderRepository(q), repository.NewNoteRepository(q))
+	var notifier service.ReminderNotifier
+	if cfg.TelegramBotToken != "" {
+		users := bootstrap.TelegramUsers(ctx, repository.NewUserRepository(q), cfg.TelegramUsers)
+		notifier = bot.NewNotifier(telegram.NewClient(cfg.TelegramBotToken), users)
+	} else {
+		slog.Warn("TELEGRAM_BOT_TOKEN kosong: reminder tidak dikirim")
+	}
+
+	w, err := worker.New(redis, cfg.WorkerConcurrency, indexSvc, authSvc, reminderSvc, notifier)
 	if err != nil {
 		bootstrap.Fatal("worker", err)
 	}

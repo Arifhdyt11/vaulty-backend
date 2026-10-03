@@ -19,10 +19,11 @@ import (
 
 // Services adalah semua service yang bisa dipasang ke versi API mana pun.
 type Services struct {
-	Auth   *service.AuthService
-	Audit  *service.AuditService
-	Note   *service.NoteService
-	Search *service.SearchService
+	Auth     *service.AuthService
+	Audit    *service.AuditService
+	Note     *service.NoteService
+	Search   *service.SearchService
+	Reminder *service.ReminderService
 }
 
 // Checker memeriksa dependensi (DB, Redis) untuk /readyz.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/hibiken/asynq"
 
@@ -19,9 +20,12 @@ type Worker struct {
 	mux       *asynq.ServeMux
 	index     *service.IndexService
 	auth      *service.AuthService
+	reminders *service.ReminderService
+	notifier  service.ReminderNotifier // nil jika Telegram belum dikonfigurasi
 }
 
-func New(redis asynq.RedisConnOpt, concurrency int, index *service.IndexService, auth *service.AuthService) (*Worker, error) {
+func New(redis asynq.RedisConnOpt, concurrency int, index *service.IndexService, auth *service.AuthService,
+	reminders *service.ReminderService, notifier service.ReminderNotifier) (*Worker, error) {
 	w := &Worker{
 		server: asynq.NewServer(redis, asynq.Config{
 			Concurrency: concurrency,
@@ -34,16 +38,21 @@ func New(redis asynq.RedisConnOpt, concurrency int, index *service.IndexService,
 		mux:       asynq.NewServeMux(),
 		index:     index,
 		auth:      auth,
+		reminders: reminders,
+		notifier:  notifier,
 	}
 	w.mux.HandleFunc(TaskIndexNote, w.handleIndexNote)
 	w.mux.HandleFunc(TaskRequeuePending, w.handleRequeuePending)
 	w.mux.HandleFunc(TaskCleanupSessions, w.handleCleanupSessions)
+	w.mux.HandleFunc(TaskDeliverReminders, w.handleDeliverReminders)
 
 	for spec, task := range map[string]string{
-		"@every 2m": TaskRequeuePending,
-		"@every 1h": TaskCleanupSessions,
+		"@every 2m":  TaskRequeuePending,
+		"@every 1h":  TaskCleanupSessions,
+		"@every 20s": TaskDeliverReminders, // NF6: telat < 1 menit
 	} {
-		if _, err := w.scheduler.Register(spec, asynq.NewTask(task, nil), asynq.MaxRetry(0)); err != nil {
+		// Unique supaya task periodik tidak menumpuk saat worker sibuk.
+		if _, err := w.scheduler.Register(spec, asynq.NewTask(task, nil), asynq.MaxRetry(0), asynq.Unique(time.Minute)); err != nil {
 			return nil, fmt.Errorf("register jadwal %s: %w", task, err)
 		}
 	}
@@ -95,6 +104,17 @@ func (w *Worker) handleCleanupSessions(ctx context.Context, _ *asynq.Task) error
 	n, err := w.auth.CleanupExpiredSessions(ctx)
 	if n > 0 {
 		slog.Info("session kedaluwarsa dihapus", "count", n)
+	}
+	return err
+}
+
+func (w *Worker) handleDeliverReminders(ctx context.Context, _ *asynq.Task) error {
+	if w.notifier == nil {
+		return nil // tanpa channel, reminder tetap pending dan terkirim setelah Telegram dikonfigurasi
+	}
+	n, err := w.reminders.DeliverDue(ctx, w.notifier)
+	if n > 0 {
+		slog.Info("reminder terkirim", "count", n)
 	}
 	return err
 }

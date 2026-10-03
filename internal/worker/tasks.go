@@ -1,4 +1,4 @@
-// Package worker berisi task asynq (Redis): indexing note, safety net, dan pembersihan session.
+// Package worker berisi task asynq (Redis): indexing note, safety net, pembersihan session, dan pengiriman reminder.
 package worker
 
 import (
@@ -17,6 +17,8 @@ const (
 	TaskRequeuePending = "note:requeue_pending"
 	// TaskCleanupSessions: hapus session kedaluwarsa.
 	TaskCleanupSessions = "session:cleanup"
+	// TaskDeliverReminders: kirim reminder yang jatuh tempo (memindai tabel reminders, ADR-023).
+	TaskDeliverReminders = "reminder:deliver"
 
 	indexMaxRetry = 5
 )

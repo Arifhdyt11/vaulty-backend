@@ -15,7 +15,6 @@ import (
 	"vaulty-api/internal/bootstrap"
 	"vaulty-api/internal/bot"
 	"vaulty-api/internal/database"
-	"vaulty-api/internal/model"
 	"vaulty-api/internal/repository"
 	"vaulty-api/internal/repository/queries"
 	"vaulty-api/internal/service"
@@ -55,30 +54,20 @@ func main() {
 	search := service.NewSearchService(noteRepo, ai, cfg.SearchMaxDistance, cfg.SearchRelativeMargin)
 	audit := service.NewAuditService(repository.NewAuditRepository(q))
 
-	users := linkedUsers(ctx, repository.NewUserRepository(q), cfg.TelegramUsers)
-	answers := service.NewAnswerService(search, ai)
-	b := bot.New(telegram.NewClient(cfg.TelegramBotToken), notes, search, answers, audit, users)
+	users := bootstrap.TelegramUsers(ctx, repository.NewUserRepository(q), cfg.TelegramUsers)
+	b := bot.New(bot.Deps{
+		TG:        telegram.NewClient(cfg.TelegramBotToken),
+		Notes:     notes,
+		Search:    search,
+		Answers:   service.NewAnswerService(search, ai),
+		Reminders: service.NewReminderService(repository.NewReminderRepository(q), repository.NewNoteRepository(q)),
+		Parser:    ai,
+		Audit:     audit,
+		Users:     users,
+	})
 	slog.Info("bot telegram berjalan", "akun_terhubung", len(users))
 	if err := b.Run(ctx); err != nil {
 		bootstrap.Fatal("bot telegram", err)
 	}
 	slog.Info("bot telegram berhenti")
-}
-
-// linkedUsers mengubah TELEGRAM_USERS (ID Telegram -> email) menjadi ID Telegram -> user_id.
-// Email yang belum terdaftar dilewati; bot perlu di-restart setelah akunnya dibuat.
-func linkedUsers(ctx context.Context, repo *repository.UserRepository, emails map[int64]string) map[int64]int64 {
-	out := make(map[int64]int64, len(emails))
-	for tgID, email := range emails {
-		u, _, err := repo.FindByEmail(ctx, email)
-		if errors.Is(err, model.ErrNotFound) {
-			slog.WarnContext(ctx, "akun Vaulty untuk TELEGRAM_USERS belum ada, dilewati", "telegram_id", tgID)
-			continue
-		}
-		if err != nil {
-			bootstrap.Fatal("cari akun TELEGRAM_USERS", err)
-		}
-		out[tgID] = u.ID
-	}
-	return out
 }

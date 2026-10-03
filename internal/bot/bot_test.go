@@ -116,7 +116,8 @@ const (
 
 func newBot() (*Bot, *fakeNotes, *fakeSearch, *fakeAudit) {
 	n, s, a := &fakeNotes{}, &fakeSearch{}, &fakeAudit{}
-	return New(nil, n, s, &fakeAnswers{}, a, map[int64]int64{tgArif: vaultID}), n, s, a
+	return New(Deps{Notes: n, Search: s, Answers: &fakeAnswers{}, Reminders: &fakeReminders{}, Parser: &fakeParser{},
+		Audit: a, Users: map[int64]int64{tgArif: vaultID}}), n, s, a
 }
 
 func msg(from int64, chatType, text string) *telegram.Message {

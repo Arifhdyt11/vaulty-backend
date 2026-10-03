@@ -47,6 +47,24 @@ type Note struct {
 	EmbeddingModel pgtype.Text
 }
 
+type Reminder struct {
+	ID          int64
+	UserID      int64
+	NoteID      pgtype.Int8
+	Text        string
+	RemindAt    pgtype.Timestamptz
+	Repeat      string
+	LeadMinutes []int32
+	NotifyAt    pgtype.Timestamptz
+	NotifyKind  string
+	Status      string
+	Attempts    int32
+	ClaimedAt   pgtype.Timestamptz
+	LastSentAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type Session struct {
 	ID        int64
 	UserID    int64

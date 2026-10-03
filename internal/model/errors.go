@@ -19,4 +19,11 @@ var (
 	ErrInvalidType = errors.New("type harus lowercase, diawali huruf, maksimal 32 karakter (a-z, 0-9, -, _)")
 	ErrBlockedType = errors.New("Vaulty tidak menyimpan credential; gunakan password manager (Bitwarden/Vaultwarden)")
 	ErrEmptyNote   = errors.New("isi minimal salah satu: title, body, atau url")
+
+	ErrEmptyReminder   = errors.New("isi reminder wajib diisi (maksimal 500 karakter)")
+	ErrReminderPast    = errors.New("waktu reminder sudah lewat")
+	ErrInvalidRepeat   = errors.New("repeat harus kosong, daily, weekly, monthly, atau yearly")
+	ErrInvalidLead     = errors.New("pengingat awal harus 1 menit sampai 365 hari, maksimal 5")
+	ErrReminderTooFar  = errors.New("waktu reminder maksimal 10 tahun dari sekarang")
+	ErrReminderInvalid = errors.New("reminder tidak bisa diubah pada status ini")
 )

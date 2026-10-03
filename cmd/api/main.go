@@ -70,9 +70,10 @@ func main() {
 			RegistrationOpen: cfg.RegistrationOpen,
 			AllowedEmails:    cfg.AllowedEmails,
 		}),
-		Audit:  service.NewAuditService(auditRepo),
-		Note:   service.NewNoteService(noteRepo, store, worker.NewEnqueuer(queue)),
-		Search: service.NewSearchService(noteRepo, ai, cfg.SearchMaxDistance, cfg.SearchRelativeMargin),
+		Audit:    service.NewAuditService(auditRepo),
+		Note:     service.NewNoteService(noteRepo, store, worker.NewEnqueuer(queue)),
+		Search:   service.NewSearchService(noteRepo, ai, cfg.SearchMaxDistance, cfg.SearchRelativeMargin),
+		Reminder: service.NewReminderService(repository.NewReminderRepository(q), repository.NewNoteRepository(q)),
 	}
 	r := router.New(cfg, services, map[string]router.Checker{
 		"database": func(ctx context.Context) error { return pool.Ping(ctx) },
