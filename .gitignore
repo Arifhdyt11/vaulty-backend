@@ -1,0 +1,9 @@
+.env
+/storage/
+/bin/
+.DS_Store
+
+# Claude Code: override pribadi
+.claude/settings.local.json
+.claude/*.local.*
+CLAUDE.local.md

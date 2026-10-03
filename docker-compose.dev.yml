@@ -1,0 +1,20 @@
+# Dev dependencies. Redis memakai instance lokal (brew), jadi hanya Postgres di sini.
+# Image sama dengan sipantas-postgres (pgvector/pgvector:pg17), container & volume terpisah.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: vaulty-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vaulty
+      POSTGRES_USER: vaulty
+      POSTGRES_PASSWORD: vaulty
+    ports: ["127.0.0.1:5434:5432"]
+    volumes: [vaulty-pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vaulty"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  vaulty-pgdata:
