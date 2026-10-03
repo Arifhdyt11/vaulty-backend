@@ -181,6 +181,9 @@ func TestHandleSearchCommandVerbatimDanDiEscape(t *testing.T) {
 	if search.q != "reload web server" || search.userID != vaultID {
 		t.Fatalf("Search dipanggil dengan q=%q user=%d", search.q, search.userID)
 	}
+	if !strings.HasPrefix(reply, "🔎 <b>1 catatan ditemukan</b>\n\n") {
+		t.Errorf("header = %q", reply)
+	}
 	if !strings.Contains(reply, "<pre>docker compose up -d &amp;&amp; curl localhost/health</pre>") ||
 		!strings.Contains(reply, "<b>1.</b> ⌨️ <b>restart &lt;nginx&gt;</b>") || !strings.Contains(reply, "🏷 nginx") {
 		t.Errorf("balasan = %q", reply)

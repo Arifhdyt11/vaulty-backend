@@ -89,10 +89,9 @@ func New(tg TelegramAPI, notes Notes, search Searcher, audit Auditor, users map[
 const (
 	searchLimit = 5
 	// Batas pesan Telegram 4096 karakter; sisakan ruang untuk tag HTML.
-	maxReply    = 3800
-	maxPreview  = 200
-	maxHeadline = 60
-	maxTags     = 4
+	maxReply   = 3800
+	maxPreview = 200
+	maxTags    = 4
 	// Mode dari menu kedaluwarsa supaya pencarian beberapa jam kemudian tidak ikut tersimpan.
 	pendingTTL = 10 * time.Minute
 )
@@ -374,7 +373,7 @@ func (b *Bot) find(ctx context.Context, userID int64, q string) Reply {
 	// Search mengurutkan menurut relevansi; di chat lebih mudah dibaca menurut urutan dibuat.
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Note.CreatedAt.Before(hits[j].Note.CreatedAt) })
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "🔎 <b>%d catatan</b> untuk <i>%s</i>", len(hits), html.EscapeString(preview(q, maxHeadline)))
+	fmt.Fprintf(&sb, "🔎 <b>%d catatan ditemukan</b>", len(hits))
 	var buttons []telegram.Button
 	for i, h := range hits {
 		item := "\n\n" + formatHit(i+1, h.Note)
