@@ -25,6 +25,7 @@ type Notes interface {
 	Create(ctx context.Context, userID int64, in model.CreateNoteInput) (model.NoteResult, error)
 	Get(ctx context.Context, userID, id int64) (model.Note, error)
 	Delete(ctx context.Context, userID, id int64) error
+	List(ctx context.Context, userID int64, f model.NoteFilter, cursor int64, limit int) ([]model.Note, *int64, error)
 }
 
 type Searcher interface {
@@ -92,6 +93,9 @@ const (
 	maxReply   = 3800
 	maxPreview = 200
 	maxTags    = 4
+	// Daftar /semua: 10 catatan per halaman, judul dipotong supaya satu baris.
+	pageSize     = 10
+	maxListTitle = 70
 	// Mode dari menu kedaluwarsa supaya pencarian beberapa jam kemudian tidak ikut tersimpan.
 	pendingTTL = 10 * time.Minute
 )
@@ -104,6 +108,7 @@ Teks biasa tanpa memilih menu = <b>cari</b>.
 /create &lt;teks&gt; — simpan catatan (URL saja otomatis jadi link)
 /create_cmd &lt;deskripsi&gt; | &lt;command&gt; — simpan command, ditampilkan apa adanya
 /cari &lt;kata kunci&gt; — cari catatan
+/semua — tampilkan semua catatan
 /help — bantuan ini`
 
 // menuCommands mengisi tombol Menu bawaan Telegram di samping kolom ketik.
@@ -112,6 +117,7 @@ var menuCommands = []telegram.Command{
 	{Command: "create", Description: "Simpan catatan: /create <teks>"},
 	{Command: "create_cmd", Description: "Simpan command: /create_cmd <deskripsi> | <command>"},
 	{Command: "cari", Description: "Cari catatan: /cari <kata kunci>"},
+	{Command: "semua", Description: "Tampilkan semua catatan"},
 	{Command: "help", Description: "Bantuan"},
 }
 
@@ -119,7 +125,7 @@ var menuReply = Reply{
 	Text: "Mau simpan apa? Pilih, lalu kirim isinya.\n<i>Teks biasa tanpa memilih = cari.</i>",
 	Keyboard: telegram.Keyboard{
 		{{Text: "📝 Catatan", CallbackData: "mode:" + modeNote}, {Text: "⌨️ Command", CallbackData: "mode:" + modeCommand}},
-		{{Text: "🔎 Cari", CallbackData: "mode:find"}},
+		{{Text: "🔎 Cari", CallbackData: "mode:find"}, {Text: "📚 Semua catatan", CallbackData: "list:0:1"}},
 	},
 }
 
@@ -224,6 +230,8 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 		return b.create(ctx, userID, model.CreateNoteInput{Type: model.NoteTypeCommand, Title: desc, Body: command}), true
 	case "cari", "search":
 		return b.find(ctx, userID, arg), true
+	case "semua", "list":
+		return b.list(ctx, userID, 0, 1), true
 	default:
 		return Reply{Text: "Perintah tidak dikenal. Kirim /help."}, true
 	}
@@ -298,6 +306,22 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 			return b.confirmDelete(ctx, userID, id)
 		}
 		return b.delete(ctx, userID, id)
+	case "list":
+		// list:<cursor>:<halaman>
+		c, p, _ := strings.Cut(arg, ":")
+		cursor, err1 := strconv.ParseInt(c, 10, 64)
+		page, err2 := strconv.Atoi(p)
+		if err1 != nil || err2 != nil || page < 1 {
+			return CallbackResult{}
+		}
+		r := b.list(ctx, userID, cursor, page)
+		return CallbackResult{Edit: &r}
+	case "open":
+		id, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			return CallbackResult{}
+		}
+		return b.open(ctx, userID, id)
 	case "delno":
 		return CallbackResult{Toast: "Batal", Edit: &Reply{Text: "Batal menghapus."}}
 	}
@@ -334,6 +358,56 @@ func (b *Bot) delete(ctx context.Context, userID, id int64) CallbackResult {
 		Metadata: map[string]any{"via": "telegram"},
 	})
 	return CallbackResult{Toast: "Terhapus", Edit: &Reply{Text: "🗑 Catatan dihapus."}}
+}
+
+// list menampilkan satu halaman catatan (terbaru dulu), satu baris per catatan.
+// Tombol nomor membuka isi lengkap; navigasi memakai cursor keyset dari NoteService.List.
+func (b *Bot) list(ctx context.Context, userID, cursor int64, page int) Reply {
+	notes, next, err := b.notes.List(ctx, userID, model.NoteFilter{}, cursor, pageSize)
+	if err != nil {
+		return Reply{Text: userError(ctx, "list note via telegram", err)}
+	}
+	if len(notes) == 0 {
+		if page == 1 {
+			return Reply{Text: "Belum ada catatan. Ketik <b>vault</b> untuk mulai menyimpan."}
+		}
+		return Reply{Text: "Tidak ada catatan lagi.", Keyboard: telegram.Keyboard{{{Text: "⏮ Ke awal", CallbackData: "list:0:1"}}}}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📚 <b>Semua catatan</b> · halaman %d\n<i>Terbaru di atas. Tekan nomor untuk lihat isi.</i>", page)
+	var nums []telegram.Button
+	for i, n := range notes {
+		no := (page-1)*pageSize + i + 1
+		fmt.Fprintf(&sb, "\n\n<b>%d.</b> %s %s\n<i>🕒 %s</i>", no, icon(n.Type), html.EscapeString(preview(headline(n), maxListTitle)), formatTime(n.CreatedAt))
+		nums = append(nums, telegram.Button{Text: strconv.Itoa(no), CallbackData: fmt.Sprintf("open:%d", n.ID)})
+	}
+	var kb telegram.Keyboard
+	for len(nums) > 0 { // maksimal 5 tombol per baris
+		k := min(5, len(nums))
+		kb, nums = append(kb, nums[:k]), nums[k:]
+	}
+	var nav []telegram.Button
+	if page > 1 {
+		nav = append(nav, telegram.Button{Text: "⏮ Ke awal", CallbackData: "list:0:1"})
+	}
+	if next != nil {
+		nav = append(nav, telegram.Button{Text: "Berikutnya ➡️", CallbackData: fmt.Sprintf("list:%d:%d", *next, page+1)})
+	}
+	if len(nav) > 0 {
+		kb = append(kb, nav)
+	}
+	return Reply{Text: sb.String(), Keyboard: kb}
+}
+
+func (b *Bot) open(ctx context.Context, userID, id int64) CallbackResult {
+	note, err := b.notes.Get(ctx, userID, id)
+	if errors.Is(err, model.ErrNotFound) {
+		return CallbackResult{Toast: "Catatan sudah tidak ada."}
+	}
+	if err != nil {
+		return CallbackResult{Toast: plainError(ctx, "ambil note via telegram", err)}
+	}
+	return CallbackResult{Send: &Reply{Text: formatHit(0, note), Keyboard: telegram.Keyboard{{deleteButton("Hapus", id)}}}}
 }
 
 func deleteButton(label string, id int64) telegram.Button {
@@ -397,11 +471,26 @@ var typeIcon = map[string]string{
 // formatHit: baris judul (nomor + ikon + judul), isi, waktu dibuat, lalu tag.
 // Note tanpa judul memakai isinya sebagai judul supaya tidak tampil "note [note]".
 // n = 0 berarti tanpa nomor.
-func formatHit(n int, note model.Note) string {
-	icon, ok := typeIcon[note.Type]
-	if !ok {
-		icon = "📌"
+func icon(noteType string) string {
+	if i, ok := typeIcon[noteType]; ok {
+		return i
 	}
+	return "📌"
+}
+
+// headline: judul, atau URL, atau isi note bila tanpa judul.
+func headline(n model.Note) string {
+	if n.Title != nil && strings.TrimSpace(*n.Title) != "" {
+		return *n.Title
+	}
+	if n.URL != nil && strings.TrimSpace(*n.URL) != "" {
+		return *n.URL
+	}
+	return n.Body
+}
+
+func formatHit(n int, note model.Note) string {
+	icon := icon(note.Type)
 	if n > 0 {
 		icon = fmt.Sprintf("<b>%d.</b> %s", n, icon)
 	}

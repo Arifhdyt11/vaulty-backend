@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,27 @@ func (f *fakeNotes) Get(_ context.Context, userID, id int64) (model.Note, error)
 		return model.Note{}, model.ErrNotFound
 	}
 	return n, nil
+}
+
+// List meniru NoteService.List: terbaru (id terbesar) dulu, cursor = id terakhir.
+func (f *fakeNotes) List(_ context.Context, userID int64, _ model.NoteFilter, cursor int64, limit int) ([]model.Note, *int64, error) {
+	var ids []int64
+	for id := range f.notes {
+		if userID == vaultID && (cursor == 0 || id < cursor) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
+	var out []model.Note
+	for _, id := range ids {
+		out = append(out, f.notes[id])
+	}
+	if len(out) <= limit {
+		return out, nil, nil
+	}
+	out = out[:limit]
+	next := out[len(out)-1].ID
+	return out, &next, nil
 }
 
 func (f *fakeNotes) Delete(_ context.Context, userID, id int64) error {
@@ -313,5 +336,31 @@ func TestCallbackAkunAsingTidakMenghapus(t *testing.T) {
 	b.HandleCallback(context.Background(), cb(999, "delok:9"))
 	if len(notes.deleted) != 0 {
 		t.Errorf("akun asing tidak boleh menghapus: %v", notes.deleted)
+	}
+}
+
+func TestSemuaCatatanBerhalaman(t *testing.T) {
+	b, notes, _, _ := newBot()
+	notes.notes = map[int64]model.Note{}
+	for id := int64(1); id <= 12; id++ {
+		notes.notes[id] = model.Note{ID: id, Type: model.NoteTypeNote, Body: fmt.Sprintf("isi-%02d", id)}
+	}
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/semua"))
+	if !strings.Contains(r.Text, "<b>1.</b> 📝 isi-12") || !strings.Contains(r.Text, "<b>10.</b> 📝 isi-03") || strings.Contains(r.Text, "isi-02") {
+		t.Fatalf("halaman 1 = %s", r.Text)
+	}
+	nav := r.Keyboard[len(r.Keyboard)-1]
+	if len(r.Keyboard) != 3 || nav[0].CallbackData != "list:3:2" {
+		t.Fatalf("keyboard = %+v", r.Keyboard)
+	}
+
+	res := b.HandleCallback(context.Background(), cb(tgArif, nav[0].CallbackData))
+	if res.Edit == nil || !strings.Contains(res.Edit.Text, "<b>11.</b> 📝 isi-02") || !strings.Contains(res.Edit.Text, "<b>12.</b> 📝 isi-01") {
+		t.Fatalf("halaman 2 = %+v", res.Edit)
+	}
+
+	open := b.HandleCallback(context.Background(), cb(tgArif, "open:5"))
+	if open.Send == nil || !strings.Contains(open.Send.Text, "isi-05") || open.Send.Keyboard[0][0].CallbackData != "del:5" {
+		t.Errorf("buka catatan = %+v", open.Send)
 	}
 }
