@@ -51,8 +51,10 @@ func New(tg TelegramAPI, notes NoteCreator, search Searcher, audit Auditor, user
 const (
 	searchLimit = 5
 	// Batas pesan Telegram 4096 karakter; sisakan ruang untuk tag HTML.
-	maxReply   = 3800
-	maxPreview = 200
+	maxReply    = 3800
+	maxPreview  = 200
+	maxHeadline = 60
+	maxTags     = 4
 )
 
 const helpText = `<b>Vaulty</b> — simpan &amp; cari catatan.
@@ -157,11 +159,11 @@ func (b *Bot) find(ctx context.Context, userID int64, q string) string {
 		return "Tidak ada catatan yang cocok."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "🔎 %d hasil:", len(hits))
-	for i, h := range hits {
-		item := formatHit(i+1, h.Note)
+	fmt.Fprintf(&sb, "🔎 <b>%d catatan</b> untuk <i>%s</i>", len(hits), html.EscapeString(preview(q, maxHeadline)))
+	for _, h := range hits {
+		item := "\n\n" + formatHit(h.Note)
 		if sb.Len()+len(item) > maxReply {
-			sb.WriteString("\n\n… hasil lain dipotong.")
+			sb.WriteString("\n\n<i>… hasil lain dipotong.</i>")
 			break
 		}
 		sb.WriteString(item)
@@ -169,38 +171,71 @@ func (b *Bot) find(ctx context.Context, userID int64, q string) string {
 	return sb.String()
 }
 
-func formatHit(n int, note model.Note) string {
-	title := note.Type
-	if note.Title != nil && strings.TrimSpace(*note.Title) != "" {
-		title = *note.Title
+var typeIcon = map[string]string{
+	model.NoteTypeNote:     "📝",
+	model.NoteTypeLink:     "🔗",
+	model.NoteTypeCommand:  "⌨️",
+	model.NoteTypeDocument: "📄",
+}
+
+// formatHit: baris judul (ikon + judul), isi, lalu tag di baris terpisah.
+// Note tanpa judul memakai isinya sebagai judul supaya tidak tampil "note [note]".
+func formatHit(note model.Note) string {
+	icon, ok := typeIcon[note.Type]
+	if !ok {
+		icon = "📌"
 	}
+	var title string
+	if note.Title != nil {
+		title = strings.TrimSpace(*note.Title)
+	}
+	url := ""
+	if note.URL != nil {
+		url = strings.TrimSpace(*note.URL)
+	}
+
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n\n<b>%d. %s</b> <i>[%s]</i>", n, html.EscapeString(title), html.EscapeString(note.Type))
-	if tags := append(append([]string{}, note.Tags...), note.AutoTags...); len(tags) > 0 {
-		sb.WriteString(" #" + html.EscapeString(strings.Join(tags, " #")))
-	}
 	switch {
 	case note.Type == model.NoteTypeCommand:
+		if title == "" {
+			title = "command"
+		}
 		// ADR-010: command ditampilkan verbatim, tidak diringkas.
 		body := note.Body
 		if len(body) > maxReply/2 {
 			body = body[:maxReply/2] + "\n…"
 		}
-		sb.WriteString("\n<pre>" + html.EscapeString(body) + "</pre>")
-	case note.URL != nil && *note.URL != "":
-		sb.WriteString("\n" + html.EscapeString(*note.URL))
+		fmt.Fprintf(&sb, "%s <b>%s</b>\n<pre>%s</pre>", icon, html.EscapeString(title), html.EscapeString(body))
+	case title != "":
+		fmt.Fprintf(&sb, "%s <b>%s</b>", icon, html.EscapeString(title))
+		if url != "" {
+			sb.WriteString("\n" + html.EscapeString(url))
+		} else if body := preview(note.Body, maxPreview); body != "" {
+			sb.WriteString("\n" + html.EscapeString(body))
+		}
+	case url != "":
+		fmt.Fprintf(&sb, "%s %s", icon, html.EscapeString(url))
 	default:
-		sb.WriteString("\n" + html.EscapeString(preview(note.Body)))
+		fmt.Fprintf(&sb, "%s %s", icon, html.EscapeString(preview(note.Body, maxPreview)))
+	}
+
+	tags := append(append([]string{}, note.Tags...), note.AutoTags...)
+	if len(tags) > maxTags {
+		tags = tags[:maxTags]
+	}
+	if len(tags) > 0 {
+		// Bukan #hashtag: Telegram memotong hashtag di tanda "-" (#docker-compose → #docker).
+		sb.WriteString("\n<i>🏷 " + html.EscapeString(strings.Join(tags, " · ")) + "</i>")
 	}
 	return sb.String()
 }
 
 var spaces = regexp.MustCompile(`\s+`)
 
-func preview(s string) string {
+func preview(s string, max int) string {
 	s = strings.TrimSpace(spaces.ReplaceAllString(s, " "))
-	if r := []rune(s); len(r) > maxPreview {
-		return string(r[:maxPreview]) + "…"
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "…"
 	}
 	return s
 }

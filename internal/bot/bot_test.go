@@ -159,8 +159,19 @@ func TestHandleSearchCommandVerbatimDanDiEscape(t *testing.T) {
 	}
 	if mode != "HTML" ||
 		!strings.Contains(reply, "<pre>docker compose up -d &amp;&amp; curl localhost/health</pre>") ||
-		!strings.Contains(reply, "restart &lt;nginx&gt;") || !strings.Contains(reply, "#nginx") {
+		!strings.Contains(reply, "⌨️ <b>restart &lt;nginx&gt;</b>") || !strings.Contains(reply, "🏷 nginx") {
 		t.Errorf("balasan = %q", reply)
+	}
+}
+
+func TestFormatHitNoteTanpaJudul(t *testing.T) {
+	got := formatHit(model.Note{
+		Type: model.NoteTypeNote, Body: "topup ml tanggal 16 okt",
+		AutoTags: []string{"ml", "topup", "oktober-16", "game", "kelima"},
+	})
+	want := "📝 topup ml tanggal 16 okt\n<i>🏷 ml · topup · oktober-16 · game</i>"
+	if got != want {
+		t.Errorf("formatHit = %q\nwant %q", got, want)
 	}
 }
 
