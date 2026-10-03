@@ -492,7 +492,7 @@ func (b *Bot) answer(ctx context.Context, tgID, userID int64, q string) Reply {
 	return Reply{Text: sb.String(), Keyboard: kb}
 }
 
-// ask: pertanyaan umum ke AI, diberi label supaya tidak tertukar dengan isi catatan.
+// ask: pertanyaan umum ke AI. Ikon 💬 sudah menandai jawaban AI, jadi tanpa label tambahan.
 func (b *Bot) ask(ctx context.Context, q string) Reply {
 	if strings.TrimSpace(q) == "" {
 		return Reply{Text: "💬 Kirim pertanyaanmu, mis. <code>/tanya mcp adalah</code>."}
@@ -502,7 +502,7 @@ func (b *Bot) ask(ctx context.Context, q string) Reply {
 		slog.WarnContext(ctx, "tanya AI gagal", "err", err)
 		return Reply{Text: "❌ AI sedang tidak bisa dipakai. Coba lagi nanti."}
 	}
-	return Reply{Text: "💬 " + formatAnswer(clip(text, maxReply-200)) + "\n\n<i>🌐 Jawaban umum AI, bukan dari catatanmu.</i>"}
+	return Reply{Text: "💬 " + formatAnswer(clip(text, maxReply))}
 }
 
 var (

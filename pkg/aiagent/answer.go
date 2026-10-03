@@ -37,7 +37,7 @@ type Answerer interface {
 	Ask(ctx context.Context, question string) (string, error)
 }
 
-const askPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maksimal sekitar 150 kata). Teks polos tanpa markdown, kecuali ` + "`kode`" + ` untuk istilah teknis, path, atau perintah. Jika tidak yakin, katakan tidak yakin.`
+const askPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maksimal sekitar 150 kata). User adalah software developer: jika istilah ambigu, pakai makna di dunia software, AI, dan DevOps lebih dulu (mis. MCP = Model Context Protocol), tanpa mendaftar makna lain kecuali diminta. Teks polos tanpa markdown, kecuali ` + "`kode`" + ` untuk istilah teknis, path, atau perintah. Jika tidak yakin, katakan tidak yakin.`
 
 const answerPrompt = `Kamu Vee, asisten catatan pribadi. Jawab pertanyaan user dalam Bahasa Indonesia, langsung dan singkat, tepat sesuai yang diminta. Contoh: diminta URL → berikan URL-nya dengan satu kalimat konteks, jangan menyalin seluruh catatan.
 

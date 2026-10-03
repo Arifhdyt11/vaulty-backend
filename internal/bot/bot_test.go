@@ -415,7 +415,7 @@ func TestTidakAdaDiCatatanTawarkanTanyaUmum(t *testing.T) {
 		t.Fatalf("harus ada tombol tanya AI umum: %+v", r.Keyboard)
 	}
 	res := b.HandleCallback(context.Background(), cb(tgArif, "askq"))
-	if ans.askQ != "mcp adalah" || res.Send == nil || !strings.Contains(res.Send.Text, "bukan dari catatanmu") ||
+	if ans.askQ != "mcp adalah" || res.Send == nil || !strings.HasPrefix(res.Send.Text, "💬 ") ||
 		!strings.Contains(res.Send.Text, "<code>Model Context Protocol</code> &lt;b&gt;") {
 		t.Errorf("tanya umum = %q, %+v", ans.askQ, res.Send)
 	}
@@ -429,7 +429,7 @@ func TestMenuTanya(t *testing.T) {
 		t.Errorf("mode tanya harus ke Ask: askQ=%q q=%q", ans.askQ, ans.q)
 	}
 	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/tanya mcp adalah"))
-	if !strings.Contains(r.Text, "bukan dari catatanmu") {
+	if r.Text != "💬 MCP adalah <code>Model Context Protocol</code> &lt;b&gt;" {
 		t.Errorf("/tanya = %q", r.Text)
 	}
 }
