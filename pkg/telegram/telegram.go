@@ -1,5 +1,5 @@
 // Package telegram adalah client minimal Telegram Bot API lewat HTTP (tanpa SDK, ADR-021):
-// long polling getUpdates dan sendMessage, cukup untuk bot quick-capture Vaulty.
+// long polling getUpdates, sendMessage/editMessageText dengan tombol inline, dan answerCallbackQuery.
 package telegram
 
 import (
@@ -42,10 +42,28 @@ type Message struct {
 	Text      string `json:"text"`
 }
 
-type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+// CallbackQuery dikirim Telegram saat user menekan tombol inline.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
 }
+
+type Update struct {
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// Button adalah tombol inline; CallbackData maksimal 64 byte.
+type Button struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+// Keyboard adalah baris-baris tombol inline di bawah pesan. nil = tanpa tombol.
+type Keyboard [][]Button
 
 // GetUpdates menunggu pesan baru hingga timeoutSec detik (long polling).
 func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]Update, error) {
@@ -53,18 +71,47 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) (
 	err := c.call(ctx, "getUpdates", map[string]any{
 		"offset":          offset,
 		"timeout":         timeoutSec,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}, &out)
 	return out, err
 }
 
 // SendMessage mengirim teks. parseMode "HTML" atau "" (teks polos).
-func (c *Client) SendMessage(ctx context.Context, chatID int64, text, parseMode string) error {
-	body := map[string]any{"chat_id": chatID, "text": text, "link_preview_options": map[string]bool{"is_disabled": true}}
+func (c *Client) SendMessage(ctx context.Context, chatID int64, text, parseMode string, kb Keyboard) error {
+	return c.call(ctx, "sendMessage", messageBody(map[string]any{"chat_id": chatID}, text, parseMode, kb), nil)
+}
+
+// EditMessageText mengganti teks pesan bot. kb nil menghapus tombolnya.
+func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, text, parseMode string, kb Keyboard) error {
+	return c.call(ctx, "editMessageText", messageBody(map[string]any{"chat_id": chatID, "message_id": messageID}, text, parseMode, kb), nil)
+}
+
+// AnswerCallbackQuery menghentikan loading di tombol; text tampil sebagai notifikasi singkat.
+func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string) error {
+	return c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)
+}
+
+// Command adalah item menu "/" bawaan Telegram. Nama hanya boleh huruf kecil, angka, dan "_".
+type Command struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// SetMyCommands mengisi tombol Menu di samping kolom ketik.
+func (c *Client) SetMyCommands(ctx context.Context, cmds []Command) error {
+	return c.call(ctx, "setMyCommands", map[string]any{"commands": cmds}, nil)
+}
+
+func messageBody(body map[string]any, text, parseMode string, kb Keyboard) map[string]any {
+	body["text"] = text
+	body["link_preview_options"] = map[string]bool{"is_disabled": true}
 	if parseMode != "" {
 		body["parse_mode"] = parseMode
 	}
-	return c.call(ctx, "sendMessage", body, nil)
+	if len(kb) > 0 {
+		body["reply_markup"] = map[string]any{"inline_keyboard": kb}
+	}
+	return body
 }
 
 func (c *Client) call(ctx context.Context, method string, body, out any) error {
