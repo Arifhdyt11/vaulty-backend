@@ -116,3 +116,10 @@ type IndexableNote struct {
 	HasContentText bool
 	ContentVersion int32
 }
+
+// Answer adalah jawaban Vee dari catatan user. Sources = note yang dipakai LLM (urut relevansi).
+type Answer struct {
+	Text      string
+	Sources   []Note
+	FromNotes bool
+}

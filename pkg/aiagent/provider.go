@@ -26,10 +26,11 @@ type Tagger interface {
 	Enabled() bool
 }
 
-// Provider menggabungkan embedding dan tagging (satu provider melayani keduanya).
+// Provider menggabungkan embedding, tagging, dan menjawab pertanyaan.
 type Provider interface {
 	Embedder
 	Tagger
+	Answerer
 }
 
 // Disabled dipakai jika OPENAI_API_KEY kosong: search jadi full-text saja, auto-tag dilewati.
@@ -39,6 +40,10 @@ func (Disabled) Embed(context.Context, string) ([]float32, error)      { return 
 func (Disabled) SuggestTags(context.Context, string) ([]string, error) { return nil, nil }
 func (Disabled) Enabled() bool                                         { return false }
 func (Disabled) Model() string                                         { return "" }
+func (Disabled) Answer(context.Context, string, []Source) (Answer, error) {
+	return Answer{}, ErrDisabled
+}
+func (Disabled) Ask(context.Context, string) (string, error) { return "", ErrDisabled }
 
 var nonTagChars = regexp.MustCompile(`[^a-z0-9\-]+`)
 

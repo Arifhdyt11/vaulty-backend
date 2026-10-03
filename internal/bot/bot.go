@@ -32,6 +32,12 @@ type Searcher interface {
 	Search(ctx context.Context, userID int64, q string, f model.NoteFilter, limit int) ([]model.SearchHit, string, error)
 }
 
+// Answerer dipenuhi *service.AnswerService.
+type Answerer interface {
+	Answer(ctx context.Context, userID int64, question string) (model.Answer, error)
+	Ask(ctx context.Context, question string) (string, error)
+}
+
 type Auditor interface {
 	Log(ctx context.Context, e repository.AuditEntry)
 }
@@ -42,6 +48,7 @@ type TelegramAPI interface {
 	EditMessageText(ctx context.Context, chatID, messageID int64, text, parseMode string, kb telegram.Keyboard) error
 	AnswerCallbackQuery(ctx context.Context, id, text string) error
 	SetMyCommands(ctx context.Context, cmds []telegram.Command) error
+	SendChatAction(ctx context.Context, chatID int64, action string) error
 }
 
 // Reply adalah pesan balasan berformat HTML, opsional dengan tombol inline.
@@ -62,6 +69,8 @@ type CallbackResult struct {
 const (
 	modeNote    = "note"
 	modeCommand = "cmd"
+	modeFind    = "find"
+	modeAsk     = "ask"
 )
 
 type pending struct {
@@ -70,21 +79,23 @@ type pending struct {
 }
 
 type Bot struct {
-	tg     TelegramAPI
-	notes  Notes
-	search Searcher
-	audit  Auditor
+	tg      TelegramAPI
+	notes   Notes
+	search  Searcher
+	answers Answerer
+	audit   Auditor
 	// users memetakan ID Telegram ke user_id Vaulty. Hanya akun di sini yang dilayani.
 	users map[int64]int64
 
 	mu      sync.Mutex
 	pending map[int64]pending // per ID Telegram
+	lastQ   map[int64]string  // pertanyaan terakhir, untuk tombol "Tanya AI umum"
 	now     func() time.Time
 }
 
-func New(tg TelegramAPI, notes Notes, search Searcher, audit Auditor, users map[int64]int64) *Bot {
-	return &Bot{tg: tg, notes: notes, search: search, audit: audit, users: users,
-		pending: map[int64]pending{}, now: time.Now}
+func New(tg TelegramAPI, notes Notes, search Searcher, answers Answerer, audit Auditor, users map[int64]int64) *Bot {
+	return &Bot{tg: tg, notes: notes, search: search, answers: answers, audit: audit, users: users,
+		pending: map[int64]pending{}, lastQ: map[int64]string{}, now: time.Now}
 }
 
 const (
@@ -94,20 +105,22 @@ const (
 	maxPreview = 200
 	maxTags    = 4
 	// Daftar /semua: 10 catatan per halaman, judul dipotong supaya satu baris.
-	pageSize     = 10
-	maxListTitle = 70
+	pageSize         = 10
+	maxSourceButtons = 3
+	maxListTitle     = 70
 	// Mode dari menu kedaluwarsa supaya pencarian beberapa jam kemudian tidak ikut tersimpan.
 	pendingTTL = 10 * time.Minute
 )
 
 const helpText = `<b>Vaulty</b> — simpan &amp; cari catatan.
 
-Ketik <b>vault</b> (atau tombol Menu) lalu pilih mau simpan apa.
-Teks biasa tanpa memilih menu = <b>cari</b>.
+Ketik <b>vault</b> (atau tombol Menu) untuk pilihan.
+Teks biasa = <b>Vee menjawab dari catatanmu</b> (mis. "url 9router apa?").
 
 /create &lt;teks&gt; — simpan catatan (URL saja otomatis jadi link)
 /create_cmd &lt;deskripsi&gt; | &lt;command&gt; — simpan command, ditampilkan apa adanya
-/cari &lt;kata kunci&gt; — cari catatan
+/cari &lt;kata kunci&gt; — daftar catatan yang cocok
+/tanya &lt;pertanyaan&gt; — tanya AI umum (bukan dari catatan)
 /semua — tampilkan semua catatan
 /help — bantuan ini`
 
@@ -116,16 +129,18 @@ var menuCommands = []telegram.Command{
 	{Command: "menu", Description: "Pilih: simpan catatan / command / cari"},
 	{Command: "create", Description: "Simpan catatan: /create <teks>"},
 	{Command: "create_cmd", Description: "Simpan command: /create_cmd <deskripsi> | <command>"},
-	{Command: "cari", Description: "Cari catatan: /cari <kata kunci>"},
+	{Command: "tanya", Description: "Tanya AI umum: /tanya mcp adalah"},
+	{Command: "cari", Description: "Daftar catatan yang cocok: /cari <kata kunci>"},
 	{Command: "semua", Description: "Tampilkan semua catatan"},
 	{Command: "help", Description: "Bantuan"},
 }
 
 var menuReply = Reply{
-	Text: "Mau simpan apa? Pilih, lalu kirim isinya.\n<i>Teks biasa tanpa memilih = cari.</i>",
+	Text: "Mau apa? Pilih, lalu kirim isinya.\n<i>Teks biasa tanpa memilih = Vee menjawab dari catatanmu.</i>",
 	Keyboard: telegram.Keyboard{
-		{{Text: "📝 Catatan", CallbackData: "mode:" + modeNote}, {Text: "⌨️ Command", CallbackData: "mode:" + modeCommand}},
-		{{Text: "🔎 Cari", CallbackData: "mode:find"}, {Text: "📚 Semua catatan", CallbackData: "list:0:1"}},
+		{{Text: "📝 Simpan catatan", CallbackData: "mode:" + modeNote}, {Text: "⌨️ Simpan command", CallbackData: "mode:" + modeCommand}},
+		{{Text: "💬 Tanya AI", CallbackData: "mode:" + modeAsk}, {Text: "🔎 Cari", CallbackData: "mode:" + modeFind}},
+		{{Text: "📚 Semua catatan", CallbackData: "list:0:1"}},
 	},
 }
 
@@ -155,6 +170,10 @@ func (b *Bot) Run(ctx context.Context) error {
 			offset = u.UpdateID + 1
 			switch {
 			case u.Message != nil:
+				// Jawaban Vee bisa beberapa detik; tampilkan "mengetik…" supaya tidak terasa macet.
+				if u.Message.Chat.Type == "private" {
+					_ = b.tg.SendChatAction(ctx, u.Message.Chat.ID, "typing")
+				}
 				if r, ok := b.Handle(ctx, u.Message); ok {
 					b.send(ctx, u.Message.Chat.ID, r)
 				}
@@ -210,7 +229,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 		if mode := b.takePending(m.From.ID); mode != "" {
 			return b.handleMode(ctx, m.From.ID, userID, mode, arg), true
 		}
-		return b.find(ctx, userID, arg), true
+		return b.answer(ctx, m.From.ID, userID, arg), true
 	}
 	// Perintah "/..." membatalkan mode dari menu.
 	b.setPending(m.From.ID, "")
@@ -229,7 +248,17 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 		}
 		return b.create(ctx, userID, model.CreateNoteInput{Type: model.NoteTypeCommand, Title: desc, Body: command}), true
 	case "cari", "search":
+		if arg == "" {
+			b.setPending(m.From.ID, modeFind)
+			return Reply{Text: "🔎 Kirim kata kunci yang mau dicari.", Keyboard: cancelKeyboard}, true
+		}
 		return b.find(ctx, userID, arg), true
+	case "tanya", "ask":
+		if arg == "" {
+			b.setPending(m.From.ID, modeAsk)
+			return Reply{Text: "💬 Kirim pertanyaanmu.", Keyboard: cancelKeyboard}, true
+		}
+		return b.ask(ctx, arg), true
 	case "semua", "list":
 		return b.list(ctx, userID, 0, 1), true
 	default:
@@ -238,6 +267,12 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 }
 
 func (b *Bot) handleMode(ctx context.Context, tgID, userID int64, mode, text string) Reply {
+	switch mode {
+	case modeFind:
+		return b.find(ctx, userID, text)
+	case modeAsk:
+		return b.ask(ctx, text)
+	}
 	if mode == modeCommand {
 		desc, command, found := splitCommand(text)
 		if !found {
@@ -290,9 +325,12 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 		case modeCommand:
 			b.setPending(cq.From.ID, modeCommand)
 			return CallbackResult{Edit: &Reply{Text: "⌨️ Kirim command-nya:\n<code>deskripsi | command</code>\natau deskripsi di baris pertama, command di baris berikutnya.", Keyboard: cancelKeyboard}}
-		case "find":
-			b.setPending(cq.From.ID, "")
-			return CallbackResult{Edit: &Reply{Text: "🔎 Kirim kata kunci yang mau dicari."}}
+		case modeFind:
+			b.setPending(cq.From.ID, modeFind)
+			return CallbackResult{Edit: &Reply{Text: "🔎 Kirim kata kunci yang mau dicari.", Keyboard: cancelKeyboard}}
+		case modeAsk:
+			b.setPending(cq.From.ID, modeAsk)
+			return CallbackResult{Edit: &Reply{Text: "💬 Kirim pertanyaanmu, mis. <i>mcp adalah</i>.", Keyboard: cancelKeyboard}}
 		default:
 			b.setPending(cq.From.ID, "")
 			return CallbackResult{Edit: &Reply{Text: "Dibatalkan."}}
@@ -322,6 +360,16 @@ func (b *Bot) HandleCallback(ctx context.Context, cq *telegram.CallbackQuery) Ca
 			return CallbackResult{}
 		}
 		return b.open(ctx, userID, id)
+	case "askq":
+		// Pertanyaan disimpan di memori karena callback_data dibatasi 64 byte.
+		b.mu.Lock()
+		q := b.lastQ[cq.From.ID]
+		b.mu.Unlock()
+		if q == "" {
+			return CallbackResult{Toast: "Pertanyaannya sudah kedaluwarsa, kirim ulang."}
+		}
+		r := b.ask(ctx, q)
+		return CallbackResult{Send: &r}
 	case "delno":
 		return CallbackResult{Toast: "Batal", Edit: &Reply{Text: "Batal menghapus."}}
 	}
@@ -408,6 +456,73 @@ func (b *Bot) open(ctx context.Context, userID, id int64) CallbackResult {
 		return CallbackResult{Toast: plainError(ctx, "ambil note via telegram", err)}
 	}
 	return CallbackResult{Send: &Reply{Text: formatHit(0, note), Keyboard: telegram.Keyboard{{deleteButton("Hapus", id)}}}}
+}
+
+// answer: Vee menjawab dari catatan, lalu tombol untuk membuka catatan sumber.
+// Isi command sumber ditampilkan verbatim oleh bot, bukan oleh LLM (ADR-010).
+func (b *Bot) answer(ctx context.Context, tgID, userID int64, q string) Reply {
+	if strings.TrimSpace(q) == "" {
+		return Reply{Text: helpText}
+	}
+	a, err := b.answers.Answer(ctx, userID, q)
+	if err != nil {
+		slog.WarnContext(ctx, "vee gagal menjawab, pakai hasil cari", "err", err)
+		r := b.find(ctx, userID, q)
+		r.Text = "<i>Vee sedang tidak bisa menjawab, ini hasil carinya.</i>\n\n" + r.Text
+		return r
+	}
+	b.mu.Lock()
+	b.lastQ[tgID] = q
+	b.mu.Unlock()
+
+	var sb strings.Builder
+	sb.WriteString("💬 " + formatAnswer(clip(a.Text, maxReply/2)))
+	var kb telegram.Keyboard
+	for _, n := range a.Sources {
+		if n.Type == model.NoteTypeCommand && sb.Len()+len(n.Body) < maxReply {
+			fmt.Fprintf(&sb, "\n\n⌨️ <b>%s</b>\n<pre>%s</pre>", html.EscapeString(headline(n)), html.EscapeString(n.Body))
+		}
+		if len(kb) < maxSourceButtons {
+			kb = append(kb, []telegram.Button{{Text: "📄 " + preview(headline(n), 40), CallbackData: fmt.Sprintf("open:%d", n.ID)}})
+		}
+	}
+	if !a.FromNotes {
+		kb = append(kb, []telegram.Button{{Text: "💬 Tanya AI umum", CallbackData: "askq"}})
+	}
+	return Reply{Text: sb.String(), Keyboard: kb}
+}
+
+// ask: pertanyaan umum ke AI, diberi label supaya tidak tertukar dengan isi catatan.
+func (b *Bot) ask(ctx context.Context, q string) Reply {
+	if strings.TrimSpace(q) == "" {
+		return Reply{Text: "💬 Kirim pertanyaanmu, mis. <code>/tanya mcp adalah</code>."}
+	}
+	text, err := b.answers.Ask(ctx, q)
+	if err != nil {
+		slog.WarnContext(ctx, "tanya AI gagal", "err", err)
+		return Reply{Text: "❌ AI sedang tidak bisa dipakai. Coba lagi nanti."}
+	}
+	return Reply{Text: "💬 " + formatAnswer(clip(text, maxReply-200)) + "\n\n<i>🌐 Jawaban umum AI, bukan dari catatanmu.</i>"}
+}
+
+var (
+	inlineCode = regexp.MustCompile("`([^`\n]+)`")
+	boldText   = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
+)
+
+// formatAnswer meng-escape jawaban LLM lalu mengubah `kode` dan **tebal** ke HTML Telegram.
+func formatAnswer(s string) string {
+	s = html.EscapeString(strings.TrimSpace(s))
+	s = inlineCode.ReplaceAllString(s, "<code>$1</code>")
+	return boldText.ReplaceAllString(s, "<b>$1</b>")
+}
+
+// clip memotong tanpa merapatkan spasi/baris baru (jawaban boleh multi-baris).
+func clip(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "…"
+	}
+	return s
 }
 
 func deleteButton(label string, id int64) telegram.Button {

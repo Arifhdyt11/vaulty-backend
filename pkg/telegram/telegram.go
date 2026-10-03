@@ -86,6 +86,11 @@ func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, t
 	return c.call(ctx, "editMessageText", messageBody(map[string]any{"chat_id": chatID, "message_id": messageID}, text, parseMode, kb), nil)
 }
 
+// SendChatAction menampilkan status (mis. "typing") selama bot menyiapkan jawaban.
+func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string) error {
+	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)
+}
+
 // AnswerCallbackQuery menghentikan loading di tombol; text tampil sebagai notifikasi singkat.
 func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string) error {
 	return c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)

@@ -83,6 +83,25 @@ func (f *fakeSearch) Search(_ context.Context, userID int64, q string, _ model.N
 	return f.hits, "hybrid", nil
 }
 
+type fakeAnswers struct {
+	q, askQ string
+	resp    model.Answer
+	err     error
+}
+
+func (f *fakeAnswers) Answer(_ context.Context, userID int64, q string) (model.Answer, error) {
+	if userID != vaultID {
+		return model.Answer{}, errors.New("user salah")
+	}
+	f.q = q
+	return f.resp, f.err
+}
+
+func (f *fakeAnswers) Ask(_ context.Context, q string) (string, error) {
+	f.askQ = q
+	return "MCP adalah `Model Context Protocol` <b>", f.err
+}
+
 type fakeAudit struct{ entries []repository.AuditEntry }
 
 func (f *fakeAudit) Log(_ context.Context, e repository.AuditEntry) { f.entries = append(f.entries, e) }
@@ -94,7 +113,7 @@ const (
 
 func newBot() (*Bot, *fakeNotes, *fakeSearch, *fakeAudit) {
 	n, s, a := &fakeNotes{}, &fakeSearch{}, &fakeAudit{}
-	return New(nil, n, s, a, map[int64]int64{tgArif: vaultID}), n, s, a
+	return New(nil, n, s, &fakeAnswers{}, a, map[int64]int64{tgArif: vaultID}), n, s, a
 }
 
 func msg(from int64, chatType, text string) *telegram.Message {
@@ -199,7 +218,7 @@ func TestHandleSearchCommandVerbatimDanDiEscape(t *testing.T) {
 		Type: model.NoteTypeCommand, Title: &title,
 		Body: "docker compose up -d && curl localhost/health", AutoTags: []string{"nginx"},
 	}}}
-	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "reload web server"))
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/cari reload web server"))
 	reply := r.Text
 	if search.q != "reload web server" || search.userID != vaultID {
 		t.Fatalf("Search dipanggil dengan q=%q user=%d", search.q, search.userID)
@@ -222,7 +241,7 @@ func TestHandleSearchUrutMenurutWaktuDibuat(t *testing.T) {
 		{Note: model.Note{Type: model.NoteTypeNote, Body: "tiga", CreatedAt: at(3)}},
 		{Note: model.Note{Type: model.NoteTypeNote, Body: "dua", CreatedAt: at(2)}},
 	}
-	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "topup"))
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/cari topup"))
 	reply := r.Text
 	i1, i2, i3 := strings.Index(reply, "satu"), strings.Index(reply, "dua"), strings.Index(reply, "tiga")
 	if !(i1 < i2 && i2 < i3) {
@@ -293,8 +312,8 @@ func TestModeKedaluwarsaDanBatal(t *testing.T) {
 	b.HandleCallback(context.Background(), cb(tgArif, "mode:note"))
 	now = now.Add(pendingTTL + time.Minute)
 	b.Handle(context.Background(), msg(tgArif, "private", "nginx"))
-	if len(notes.got) != 0 || search.q != "nginx" {
-		t.Errorf("mode kedaluwarsa harus jadi pencarian: notes=%v q=%q", notes.got, search.q)
+	if q := b.answers.(*fakeAnswers).q; len(notes.got) != 0 || q != "nginx" || search.q != "" {
+		t.Errorf("mode kedaluwarsa harus dijawab Vee: notes=%v q=%q", notes.got, q)
 	}
 
 	b.HandleCallback(context.Background(), cb(tgArif, "mode:note"))
@@ -309,7 +328,7 @@ func TestHapusDenganKonfirmasi(t *testing.T) {
 	b, notes, search, audit := newBot()
 	notes.notes = map[int64]model.Note{9: {ID: 9, Type: model.NoteTypeNote, Body: "topup ml"}}
 	search.hits = []model.SearchHit{{Note: notes.notes[9]}}
-	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "topup"))
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/cari topup"))
 	if len(r.Keyboard) != 1 || r.Keyboard[0][0].CallbackData != "del:9" {
 		t.Fatalf("hasil cari harus punya tombol hapus, dapat %+v", r.Keyboard)
 	}
@@ -362,5 +381,64 @@ func TestSemuaCatatanBerhalaman(t *testing.T) {
 	open := b.HandleCallback(context.Background(), cb(tgArif, "open:5"))
 	if open.Send == nil || !strings.Contains(open.Send.Text, "isi-05") || open.Send.Keyboard[0][0].CallbackData != "del:5" {
 		t.Errorf("buka catatan = %+v", open.Send)
+	}
+}
+
+func TestTeksBiasaDijawabVee(t *testing.T) {
+	b, _, _, _ := newBot()
+	title := "restart vaulty api"
+	ans := b.answers.(*fakeAnswers)
+	ans.resp = model.Answer{Text: "Buka `http://43.163.100.39:20128` <x>", FromNotes: true, Sources: []model.Note{
+		{ID: 10, Type: model.NoteTypeNote, Body: "9router di :20128"},
+		{ID: 19, Type: model.NoteTypeCommand, Title: &title, Body: "docker compose up -d api && echo ok"},
+	}}
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "berikan saya url 9router"))
+	if ans.q != "berikan saya url 9router" {
+		t.Fatalf("Answer dipanggil dengan %q", ans.q)
+	}
+	if !strings.HasPrefix(r.Text, "💬 Buka <code>http://43.163.100.39:20128</code> &lt;x&gt;") ||
+		!strings.Contains(r.Text, "<pre>docker compose up -d api &amp;&amp; echo ok</pre>") {
+		t.Errorf("balasan = %q", r.Text)
+	}
+	if len(r.Keyboard) != 2 || r.Keyboard[0][0].CallbackData != "open:10" || r.Keyboard[1][0].CallbackData != "open:19" {
+		t.Errorf("tombol = %+v", r.Keyboard)
+	}
+}
+
+func TestTidakAdaDiCatatanTawarkanTanyaUmum(t *testing.T) {
+	b, _, _, _ := newBot()
+	ans := b.answers.(*fakeAnswers)
+	ans.resp = model.Answer{Text: "Tidak ada di catatanmu."}
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "mcp adalah"))
+	last := r.Keyboard[len(r.Keyboard)-1][0]
+	if last.CallbackData != "askq" {
+		t.Fatalf("harus ada tombol tanya AI umum: %+v", r.Keyboard)
+	}
+	res := b.HandleCallback(context.Background(), cb(tgArif, "askq"))
+	if ans.askQ != "mcp adalah" || res.Send == nil || !strings.Contains(res.Send.Text, "bukan dari catatanmu") ||
+		!strings.Contains(res.Send.Text, "<code>Model Context Protocol</code> &lt;b&gt;") {
+		t.Errorf("tanya umum = %q, %+v", ans.askQ, res.Send)
+	}
+}
+
+func TestMenuTanya(t *testing.T) {
+	b, _, _, _ := newBot()
+	b.HandleCallback(context.Background(), cb(tgArif, "mode:ask"))
+	b.Handle(context.Background(), msg(tgArif, "private", "docker itu apa"))
+	if ans := b.answers.(*fakeAnswers); ans.askQ != "docker itu apa" || ans.q != "" {
+		t.Errorf("mode tanya harus ke Ask: askQ=%q q=%q", ans.askQ, ans.q)
+	}
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/tanya mcp adalah"))
+	if !strings.Contains(r.Text, "bukan dari catatanmu") {
+		t.Errorf("/tanya = %q", r.Text)
+	}
+}
+
+func TestVeeGagalJatuhKeCari(t *testing.T) {
+	b, _, search, _ := newBot()
+	b.answers.(*fakeAnswers).err = errors.New("quota habis")
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "nginx"))
+	if search.q != "nginx" || !strings.Contains(r.Text, "tidak bisa menjawab") || strings.Contains(r.Text, "quota") {
+		t.Errorf("fallback = %q (q=%q)", r.Text, search.q)
 	}
 }

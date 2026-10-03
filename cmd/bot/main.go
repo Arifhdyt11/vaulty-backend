@@ -56,7 +56,8 @@ func main() {
 	audit := service.NewAuditService(repository.NewAuditRepository(q))
 
 	users := linkedUsers(ctx, repository.NewUserRepository(q), cfg.TelegramUsers)
-	b := bot.New(telegram.NewClient(cfg.TelegramBotToken), notes, search, audit, users)
+	answers := service.NewAnswerService(search, ai)
+	b := bot.New(telegram.NewClient(cfg.TelegramBotToken), notes, search, answers, audit, users)
 	slog.Info("bot telegram berjalan", "akun_terhubung", len(users))
 	if err := b.Run(ctx); err != nil {
 		bootstrap.Fatal("bot telegram", err)
