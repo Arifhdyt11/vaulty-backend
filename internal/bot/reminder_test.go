@@ -96,12 +96,26 @@ func TestReminderKonfirmasiLaluSimpan(t *testing.T) {
 	}
 }
 
-func TestReminderJauhDefaultBertahap(t *testing.T) {
-	b, parser, _ := reminderBot()
+func TestReminderDefaultTanpaPengingatAwal(t *testing.T) {
+	b, parser, rem := reminderBot()
+	ctx := context.Background()
 	parser.draft = aiagent.ReminderDraft{Text: "perpanjang server", At: time.Date(2027, 8, 1, 9, 0, 0, 0, wib)}
-	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/ingatkan 1 agustus 2027 perpanjang server"))
-	if !strings.Contains(r.Text, "Diingatkan juga: H-30, H-7, H-1") || !strings.Contains(callbacks(r.Keyboard), "✅ H-30") {
-		t.Errorf("draft = %q / %s", r.Text, callbacks(r.Keyboard))
+	r, _ := b.Handle(ctx, msg(tgArif, "private", "/ingatkan 1 agustus 2027 perpanjang server"))
+	kb := callbacks(r.Keyboard)
+	if strings.Contains(r.Text, "Diingatkan juga") || strings.Contains(kb, "✅ H-") || !strings.Contains(kb, "H-30=rlead:43200") {
+		t.Fatalf("default harus kosong tapi tombol tetap ditawarkan: %q / %s", r.Text, kb)
+	}
+	b.HandleCallback(ctx, cb(tgArif, "rlead:10080"))
+	b.HandleCallback(ctx, cb(tgArif, "rsave"))
+	if len(rem.created) != 1 || len(rem.created[0].LeadMinutes) != 1 || rem.created[0].LeadMinutes[0] != 10080 {
+		t.Errorf("created = %+v", rem.created)
+	}
+
+	// Disebut di kalimat → langsung tercentang.
+	parser.draft.LeadMinutes = []int{1440}
+	r, _ = b.Handle(ctx, msg(tgArif, "private", "/ingatkan 1 agustus 2027 perpanjang server, H-1"))
+	if !strings.Contains(callbacks(r.Keyboard), "✅ H-1") {
+		t.Errorf("lead dari kalimat harus tercentang: %s", callbacks(r.Keyboard))
 	}
 }
 

@@ -77,16 +77,8 @@ func (b *Bot) startReminder(ctx context.Context, tgID int64, text string) Reply 
 	if !d.At.After(now) {
 		return Reply{Text: fmt.Sprintf("⚠️ Waktunya sudah lewat (%s). Kirim ulang dengan waktu lain.", formatWhen(d.At))}
 	}
-	leads := d.LeadMinutes
-	if len(leads) == 0 { // default pengingat bertahap untuk acara yang masih jauh
-		switch until := d.At.Sub(now); {
-		case until > 30*24*time.Hour:
-			leads = []int{30 * 1440, 7 * 1440, 1440}
-		case until > 7*24*time.Hour:
-			leads = []int{7 * 1440, 1440}
-		}
-	}
-	dr := &draft{in: model.CreateReminderInput{Text: d.Text, RemindAt: d.At, Repeat: d.Repeat, LeadMinutes: leads}, until: now.Add(pendingTTL)}
+	// Default hanya saat acara; pengingat awal (H-1, H-7, ...) dicentang user atau disebut di kalimat.
+	dr := &draft{in: model.CreateReminderInput{Text: d.Text, RemindAt: d.At, Repeat: d.Repeat, LeadMinutes: d.LeadMinutes}, until: now.Add(pendingTTL)}
 	b.mu.Lock()
 	b.drafts[tgID] = dr
 	b.mu.Unlock()
