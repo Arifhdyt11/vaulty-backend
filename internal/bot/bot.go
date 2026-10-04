@@ -46,6 +46,7 @@ type Auditor interface {
 type TelegramAPI interface {
 	GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]telegram.Update, error)
 	SendMessage(ctx context.Context, chatID int64, text, parseMode string, kb telegram.Keyboard) error
+	SendMessageReplyKeyboard(ctx context.Context, chatID int64, text, parseMode string, rk telegram.ReplyKeyboard, placeholder string) error
 	EditMessageText(ctx context.Context, chatID, messageID int64, text, parseMode string, kb telegram.Keyboard) error
 	AnswerCallbackQuery(ctx context.Context, id, text string) error
 	SetMyCommands(ctx context.Context, cmds []telegram.Command) error
@@ -53,9 +54,11 @@ type TelegramAPI interface {
 }
 
 // Reply adalah pesan balasan berformat HTML, opsional dengan tombol inline.
+// MenuButton memasang tombol "📋 Menu" tetap di bawah kolom ketik (tidak bisa digabung dengan Keyboard).
 type Reply struct {
-	Text     string
-	Keyboard telegram.Keyboard
+	Text       string
+	Keyboard   telegram.Keyboard
+	MenuButton bool
 }
 
 // CallbackResult adalah hasil menekan tombol: Toast tampil sebentar di layar,
@@ -145,7 +148,7 @@ const (
 
 const helpText = `<b>Vaulty</b> — simpan &amp; cari catatan.
 
-Ketik <b>vault</b> (atau tombol Menu) untuk pilihan.
+Tekan <b>📋 Menu</b> di bawah (atau ketik <b>vault</b>) untuk pilihan.
 Teks biasa = <b>Vee menjawab dari catatanmu</b> (mis. "url 9router apa?").
 
 /create &lt;teks&gt; — simpan catatan (URL saja otomatis jadi link)
@@ -157,18 +160,18 @@ Teks biasa = <b>Vee menjawab dari catatanmu</b> (mis. "url 9router apa?").
 /semua — tampilkan semua catatan
 /help — bantuan ini`
 
-// menuCommands mengisi tombol Menu bawaan Telegram di samping kolom ketik.
+// menuCommands mengisi tombol Menu bawaan Telegram di samping kolom ketik. Telegram hanya bisa
+// menampilkannya sebagai daftar, jadi cukup satu item yang membuka menu tombol; perintah lain
+// tetap jalan bila diketik (lihat /help).
 var menuCommands = []telegram.Command{
-	{Command: "menu", Description: "Pilih: simpan catatan / command / cari"},
-	{Command: "create", Description: "Simpan catatan: /create <teks>"},
-	{Command: "create_cmd", Description: "Simpan command: /create_cmd <deskripsi> | <command>"},
-	{Command: "tanya", Description: "Tanya AI umum: /tanya mcp adalah"},
-	{Command: "cari", Description: "Daftar catatan yang cocok: /cari <kata kunci>"},
-	{Command: "semua", Description: "Tampilkan semua catatan"},
-	{Command: "ingatkan", Description: "Buat reminder: /ingatkan besok jam 9 follow up client"},
-	{Command: "reminder", Description: "Daftar reminder aktif"},
-	{Command: "help", Description: "Bantuan"},
+	{Command: "menu", Description: "Buka menu Vaulty"},
 }
+
+// menuButton adalah tombol tetap di bawah kolom ketik; menekannya mengirim teks ini.
+const (
+	menuButton      = "📋 Menu"
+	menuPlaceholder = "Tanya Vee, atau tekan 📋 Menu"
+)
 
 var menuReply = Reply{
 	Text: "Mau apa? Pilih, lalu kirim isinya.\n<i>Teks biasa tanpa memilih = Vee menjawab dari catatanmu.</i>",
@@ -220,7 +223,13 @@ func (b *Bot) Run(ctx context.Context) error {
 }
 
 func (b *Bot) send(ctx context.Context, chatID int64, r Reply) {
-	if err := b.tg.SendMessage(ctx, chatID, r.Text, "HTML", r.Keyboard); err != nil {
+	var err error
+	if r.MenuButton {
+		err = b.tg.SendMessageReplyKeyboard(ctx, chatID, r.Text, "HTML", telegram.ReplyKeyboard{{menuButton}}, menuPlaceholder)
+	} else {
+		err = b.tg.SendMessage(ctx, chatID, r.Text, "HTML", r.Keyboard)
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "telegram sendMessage gagal", "err", err)
 	}
 }
@@ -257,7 +266,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 	}
 	cmd, arg := parseCommand(m.Text)
 	if cmd == "" {
-		if strings.EqualFold(arg, "vault") || strings.EqualFold(arg, "menu") {
+		if strings.EqualFold(arg, "vault") || strings.EqualFold(arg, "menu") || arg == menuButton {
 			b.setPending(m.From.ID, "")
 			return menuReply, true
 		}
@@ -274,7 +283,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) (Reply, bool) {
 
 	switch cmd {
 	case "start", "help":
-		return Reply{Text: helpText}, true
+		return Reply{Text: helpText, MenuButton: true}, true
 	case "menu":
 		return menuReply, true
 	case "create":

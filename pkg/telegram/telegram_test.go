@@ -92,3 +92,22 @@ func TestGetUpdatesCallbackQuery(t *testing.T) {
 		t.Errorf("callback = %+v", ups[0].CallbackQuery)
 	}
 }
+
+func TestSendMessageReplyKeyboard(t *testing.T) {
+	var got map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	})
+	if err := c.SendMessageReplyKeyboard(context.Background(), 1, "hai", "HTML", ReplyKeyboard{{"📋 Menu"}}, "ketik…"); err != nil {
+		t.Fatal(err)
+	}
+	rm, _ := got["reply_markup"].(map[string]any)
+	rows, _ := rm["keyboard"].([]any)
+	if len(rows) != 1 || rows[0].([]any)[0].(map[string]any)["text"] != "📋 Menu" {
+		t.Fatalf("keyboard = %v", rm)
+	}
+	if rm["is_persistent"] != true || rm["resize_keyboard"] != true || rm["input_field_placeholder"] != "ketik…" {
+		t.Errorf("reply_markup = %v", rm)
+	}
+}

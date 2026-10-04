@@ -81,6 +81,25 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text, parseMode 
 	return c.call(ctx, "sendMessage", messageBody(map[string]any{"chat_id": chatID}, text, parseMode, kb), nil)
 }
 
+// ReplyKeyboard adalah tombol tetap di bawah kolom ketik; menekannya mengirim teks tombol itu.
+type ReplyKeyboard [][]string
+
+// SendMessageReplyKeyboard mengirim teks sekaligus memasang ReplyKeyboard yang menetap
+// (tetap tampil sampai diganti), dengan placeholder di kolom ketik.
+func (c *Client) SendMessageReplyKeyboard(ctx context.Context, chatID int64, text, parseMode string, rk ReplyKeyboard, placeholder string) error {
+	rows := make([][]map[string]string, len(rk))
+	for i, row := range rk {
+		for _, t := range row {
+			rows[i] = append(rows[i], map[string]string{"text": t})
+		}
+	}
+	body := messageBody(map[string]any{"chat_id": chatID}, text, parseMode, nil)
+	body["reply_markup"] = map[string]any{
+		"keyboard": rows, "is_persistent": true, "resize_keyboard": true, "input_field_placeholder": placeholder,
+	}
+	return c.call(ctx, "sendMessage", body, nil)
+}
+
 // EditMessageText mengganti teks pesan bot. kb nil menghapus tombolnya.
 func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, text, parseMode string, kb Keyboard) error {
 	return c.call(ctx, "editMessageText", messageBody(map[string]any{"chat_id": chatID, "message_id": messageID}, text, parseMode, kb), nil)

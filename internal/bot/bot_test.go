@@ -495,3 +495,15 @@ func TestRiwayatDibatasi(t *testing.T) {
 		t.Errorf("history = %+v mode=%q", h, mode)
 	}
 }
+
+func TestTombolMenuTetap(t *testing.T) {
+	b, _, _, _ := newBot()
+	r, _ := b.Handle(context.Background(), msg(tgArif, "private", "/start"))
+	if !r.MenuButton {
+		t.Errorf("/start harus memasang tombol 📋 Menu, dapat %+v", r)
+	}
+	r, _ = b.Handle(context.Background(), msg(tgArif, "private", menuButton))
+	if len(r.Keyboard) == 0 || r.Text != menuReply.Text {
+		t.Errorf("tombol 📋 Menu harus membuka menu, dapat %+v", r)
+	}
+}
