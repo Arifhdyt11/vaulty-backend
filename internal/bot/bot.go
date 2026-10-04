@@ -49,7 +49,7 @@ type TelegramAPI interface {
 	SendMessageReplyKeyboard(ctx context.Context, chatID int64, text, parseMode string, rk telegram.ReplyKeyboard, placeholder string) error
 	EditMessageText(ctx context.Context, chatID, messageID int64, text, parseMode string, kb telegram.Keyboard) error
 	AnswerCallbackQuery(ctx context.Context, id, text string) error
-	SetMyCommands(ctx context.Context, cmds []telegram.Command) error
+	DeleteMyCommands(ctx context.Context) error
 	SendChatAction(ctx context.Context, chatID int64, action string) error
 }
 
@@ -160,14 +160,8 @@ Teks biasa = <b>Vee menjawab dari catatanmu</b> (mis. "url 9router apa?").
 /semua — tampilkan semua catatan
 /help — bantuan ini`
 
-// menuCommands mengisi tombol Menu bawaan Telegram di samping kolom ketik. Telegram hanya bisa
-// menampilkannya sebagai daftar, jadi cukup satu item yang membuka menu tombol; perintah lain
-// tetap jalan bila diketik (lihat /help).
-var menuCommands = []telegram.Command{
-	{Command: "menu", Description: "Buka menu Vaulty"},
-}
-
-// menuButton adalah tombol tetap di bawah kolom ketik; menekannya mengirim teks ini.
+// menuButton adalah tombol tetap di bawah kolom ketik; menekannya mengirim teks ini. Ini satu-satunya
+// tombol menu: daftar perintah bawaan Telegram dikosongkan supaya tidak dobel (perintah tetap jalan bila diketik).
 const (
 	menuButton      = "📋 Menu"
 	menuPlaceholder = "Tanya Vee, atau tekan 📋 Menu"
@@ -186,8 +180,8 @@ var cancelKeyboard = telegram.Keyboard{{{Text: "✖️ Batal", CallbackData: "mo
 
 // Run melakukan long polling sampai ctx dibatalkan.
 func (b *Bot) Run(ctx context.Context) error {
-	if err := b.tg.SetMyCommands(ctx, menuCommands); err != nil {
-		slog.WarnContext(ctx, "telegram setMyCommands gagal", "err", err)
+	if err := b.tg.DeleteMyCommands(ctx); err != nil {
+		slog.WarnContext(ctx, "telegram deleteMyCommands gagal", "err", err)
 	}
 	var offset int64
 	for {

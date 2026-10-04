@@ -126,6 +126,11 @@ func (c *Client) SetMyCommands(ctx context.Context, cmds []Command) error {
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": cmds}, nil)
 }
 
+// DeleteMyCommands mengosongkan daftar perintah, sehingga tombol Menu bawaan di kiri kolom ketik hilang.
+func (c *Client) DeleteMyCommands(ctx context.Context) error {
+	return c.call(ctx, "deleteMyCommands", map[string]any{}, nil)
+}
+
 func messageBody(body map[string]any, text, parseMode string, kb Keyboard) map[string]any {
 	body["text"] = text
 	body["link_preview_options"] = map[string]bool{"is_disabled": true}
