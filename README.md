@@ -34,17 +34,18 @@ Alur: `router` → `middleware` → `handler/v1` → `service` → `repository` 
 
 ## Menjalankan (development)
 
-Butuh Go 1.26, Docker, dan Ollama (opsional, untuk AI).
+Butuh Go 1.26, Docker, dan akses SSH ke sipantas (AI lewat Hermes + 9router).
 
 ```bash
-cp .env.example .env     # port default 8080; ganti HTTP_ADDR/BASE_URL bila bentrok
+cp .env.example .env     # isi AI_API_KEY & AI_EMBED_API_KEY; port dev 8081 (8080 dipakai proyek lain)
 make dev-deps            # Postgres pgvector :5435, Redis :6380 (MinIO: docker compose --profile s3 up -d)
+make tunnel              # terminal terpisah: tunnel ke Hermes :8642 & 9router :20128, menyambung ulang otomatis
 make migrate
-make api                 # Swagger: http://localhost:8080/api/docs
+make api                 # Swagger: http://localhost:8081/api/docs
 make worker              # terminal terpisah
 ```
 
-Model Ollama default: `ollama pull qwen2.5:7b-instruct` (chat) dan `ollama pull bge-m3` (embedding, 1024 dim; di-pad ke kolom vector(1536)). Untuk OCR gambar butuh model multimodal (`AI_VISION_MODEL`, mis. `llava` atau `gpt-4o-mini`); untuk transkrip suara butuh endpoint STT Whisper-kompatibel (`AI_STT_*`). Tanpa `AI_BASE_URL`, search jatuh ke full-text dan chat/ringkasan dimatikan.
+Chat/ringkasan lewat Hermes (`hermes-vaulty`), embedding lewat 9router (`openai/text-embedding-3-small`, 1536 dim). Untuk OCR gambar butuh model multimodal di `AI_VISION_MODEL`; untuk transkrip suara butuh endpoint STT Whisper-kompatibel (`AI_STT_*`). Kalau tunnel mati, capture tetap tersimpan dan item diproses ulang oleh safety net worker setelah tunnel hidup (atau `go run ./cmd/vaulty requeue`).
 
 Push butuh `FCM_CREDENTIALS_FILE` (service account Firebase). Billing butuh `REVENUECAT_WEBHOOK_SECRET` (+ `REVENUECAT_API_KEY` untuk `/billing/sync`).
 
