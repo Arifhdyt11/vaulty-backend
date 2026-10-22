@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+bin/
+storage/
+*.pem
+*.p8
+*.p12
+firebase-*.json
+service-account*.json
+.DS_Store
+coverage.out
+.claude/settings.local.json
