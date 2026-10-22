@@ -419,13 +419,23 @@ func (s *IngestService) stageUnderstand(ctx context.Context, u model.User, it *m
 	now := time.Now().In(u.Location())
 	userMsg := fmt.Sprintf("WAKTU SEKARANG: %s (%s)\nJENIS: %s\nPLATFORM: %s\nUSER_NOTE: %s\n\nKONTEN:\n%s",
 		now.Format(time.RFC3339), u.Timezone, it.Kind, deref(it.Platform), it.UserNote, content)
-	resp, err := s.chat.Complete(ctx, ai.ChatRequest{Model: s.chatModel, System: understandPrompt, JSON: true, MaxTokens: 1200, Temperature: 0.2,
-		Messages: []ai.Message{{Role: "user", Content: userMsg}}})
-	if err != nil {
-		return model.Stage{Status: "failed", Error: "llm: " + ai.Truncate(err.Error(), 200)}
-	}
+	// Model kecil sesekali menjawab di luar format JSON; coba sekali lagi dengan pengingat format.
 	var out understandOut
-	if err := ai.ParseJSONLoose(resp.Content, &out); err != nil {
+	parsed := false
+	msgs := []ai.Message{{Role: "user", Content: userMsg}}
+	for attempt := 0; attempt < 2 && !parsed; attempt++ {
+		resp, err := s.chat.Complete(ctx, ai.ChatRequest{Model: s.chatModel, System: understandPrompt, JSON: true, MaxTokens: 1200, Temperature: 0.2, Messages: msgs})
+		if err != nil {
+			return model.Stage{Status: "failed", Error: "llm: " + ai.Truncate(err.Error(), 200)}
+		}
+		if err := ai.ParseJSONLoose(resp.Content, &out); err == nil && strings.TrimSpace(out.Summary) != "" {
+			parsed = true
+			break
+		}
+		msgs = append(msgs, ai.Message{Role: "assistant", Content: ai.Truncate(resp.Content, 1500)},
+			ai.Message{Role: "user", Content: "Jawabanmu bukan JSON yang valid. Keluarkan HANYA objek JSON sesuai format yang diminta, tanpa teks lain."})
+	}
+	if !parsed {
 		return model.Stage{Status: "failed", Error: "jawaban LLM bukan JSON"}
 	}
 	p := repository.UnderstandPatch{Summary: strings.TrimSpace(out.Summary), KeyPoints: trimAll(out.KeyPoints, 8), Entities: out.Entities,
