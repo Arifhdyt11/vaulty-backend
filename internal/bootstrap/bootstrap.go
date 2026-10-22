@@ -22,6 +22,7 @@ import (
 	"vaulty/pkg/ai"
 	"vaulty/pkg/fetch"
 	"vaulty/pkg/googleauth"
+	"vaulty/pkg/media"
 	"vaulty/pkg/push"
 	"vaulty/pkg/storage"
 )
@@ -134,7 +135,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.Billing = service.NewBillingService(a.Repos, cfg.RevenueCatAPIKey)
 	a.Account = service.NewAccountService(a.Repos, a.Store, a.Queue, a.Ent)
 	fetcher := fetch.New(fetch.Options{AllowPrivate: cfg.FetchAllowPrivate})
-	a.Ingest = service.NewIngestService(service.IngestDeps{Repos: a.Repos, Store: a.Store, Fetcher: fetcher, Chat: a.AI, Embedder: a.AI, STT: a.AI,
+	// Vision (gambar & frame video) boleh di server berbeda dari chat: Hermes hanya teks,
+	// jadi vision diarahkan langsung ke 9router (ADR-015).
+	vision := ai.New(ai.Config{Chat: ai.Endpoint{BaseURL: cfg.AIVisionBaseURL, APIKey: cfg.AIVisionAPIKey}, ChatModel: cfg.AIVisionModel,
+		EmbedDim: cfg.AIEmbedDim, HTTP: &http.Client{Timeout: 180 * time.Second}})
+	a.Ingest = service.NewIngestService(service.IngestDeps{Repos: a.Repos, Store: a.Store, Fetcher: fetcher, Chat: a.AI, Vision: vision, Embedder: a.AI, STT: a.AI,
+		Media: media.New(media.Options{}), VideoMaxFrames: cfg.VideoMaxFrames, MaxVideoMinutes: cfg.AIMaxSTTMinutes,
 		VisionModel: cfg.AIVisionModel, ChatModel: cfg.AIChatModel, Reminders: a.Remind, Entitlement: a.Ent, AIEnabled: a.AIOn})
 	return a, nil
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -180,5 +181,25 @@ func TestFinalStatus(t *testing.T) {
 	// URL tetap tersimpan walau fetch gagal → partial (app menawarkan screenshot).
 	if finalStatus(failed) != "partial" {
 		t.Fatal("partial")
+	}
+}
+
+func TestTranscribeVideoFreeDilewati(t *testing.T) {
+	s := &IngestService{aiOn: true}
+	src := "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+	platform := "youtube"
+	st := s.transcribeVideo(context.Background(), model.User{Plan: "free"}, &model.Item{Kind: "url", SourceURL: &src, Platform: &platform})
+	if st.Status != "skipped" || !strings.Contains(st.Error, "Pro") {
+		t.Fatalf("%+v", st)
+	}
+}
+
+func TestTranscribeVideoTanpaAlatDilewati(t *testing.T) {
+	s := &IngestService{aiOn: true, maxVideoMin: 30}
+	src := "https://vt.tiktok.com/x"
+	platform := "tiktok"
+	st := s.transcribeVideo(context.Background(), model.User{Plan: "pro"}, &model.Item{Kind: "url", SourceURL: &src, Platform: &platform})
+	if st.Status != "skipped" || !strings.Contains(st.Error, "yt-dlp") {
+		t.Fatalf("%+v", st)
 	}
 }

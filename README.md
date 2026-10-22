@@ -34,7 +34,7 @@ Alur: `router` → `middleware` → `handler/v1` → `service` → `repository` 
 
 ## Menjalankan (development)
 
-Butuh Go 1.26, Docker, dan akses SSH ke sipantas (AI lewat Hermes + 9router).
+Butuh Go 1.26, Docker, `yt-dlp` + `ffmpeg` (`brew install yt-dlp ffmpeg`, untuk isi video), dan akses SSH ke sipantas (AI lewat Hermes + 9router).
 
 ```bash
 cp .env.example .env     # isi AI_API_KEY & AI_EMBED_API_KEY; port dev 8081 (8080 dipakai proyek lain)
@@ -72,4 +72,4 @@ go run ./cmd/vaulty requeue   # enqueue ulang item yang macet di queued/processi
 
 - Selesai & teruji lokal: auth (email/password, refresh rotasi), capture url/teks/gambar/suara/file, pipeline fetch→transcribe→understand→index, search full-text + hybrid, chat SSE dengan citation tervalidasi, reminder (kalimat natural & terstruktur, berulang, bertahap, snooze), devices, kuota Free/Pro + 402, webhook RevenueCat, ekspor data, hapus akun.
 - Belum diuji dengan layanan nyata: login Google, push FCM, RevenueCat, S3/R2 (MinIO opsional), STT, vision (perlu model multimodal).
-- Transkrip video sosmed/YouTube tanpa caption belum didukung (fallback: screenshot pendamping `POST /items/{id}/attachments`).
+- Isi video YouTube/TikTok/Instagram (Pro) dibaca dari transkrip Whisper + frame vision (ADR-015). Instagram yang minta login dan link Dribbble jatuh ke caption/screenshot.

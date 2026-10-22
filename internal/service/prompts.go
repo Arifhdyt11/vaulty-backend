@@ -19,7 +19,9 @@ Aturan:
 - Hanya buat suggested_reminders bila konten jelas memuat tanggal/deadline/acara mendatang atau ajakan aksi berwaktu. Kalau tidak ada, kosongkan [].
 - Tanggal relatif ("besok", "minggu depan") dihitung dari WAKTU SEKARANG yang diberikan, zona waktu user.
 - Jangan mengarang fakta yang tidak ada di konten. Kalau konten kosong/tidak jelas, ringkasan boleh menyebutkan itu.
-- Catatan user (USER_NOTE) adalah konteks kenapa ia menyimpan; pertimbangkan dalam ringkasan dan tag.`
+- Catatan user (USER_NOTE) adalah konteks kenapa ia menyimpan; pertimbangkan dalam ringkasan dan tag.
+- Bila ISI memuat [Transkrip video] atau [Isi layar video], ringkasan WAJIB berdasarkan isi video itu (apa yang dijelaskan/ditunjukkan), bukan hanya judul atau caption.
+- Tulis ringkasan dan poin dalam Bahasa Indonesia dengan huruf Latin saja; jangan menyisipkan aksara lain (mis. Mandarin).`
 
 const visionPrompt = `Kamu membaca gambar/screenshot yang disimpan user. Keluarkan JSON persis:
 {"text": "semua teks yang terbaca di gambar, urut, apa adanya", "description": "deskripsi singkat isi gambar dalam Bahasa Indonesia (1-2 kalimat)"}
@@ -45,3 +47,7 @@ Aturan:
 - "H-30 dan H-7" atau "ingatkan seminggu sebelumnya" → lead_minutes. Default lead_minutes [].
 - Kalau waktu tidak bisa ditentukan, remind_at = "" dan confidence rendah.
 Keluarkan hanya JSON.`
+
+const videoFramesPrompt = `Kamu membaca beberapa frame dari satu video (urut dari awal ke akhir) yang disimpan user.
+Keluarkan JSON persis: {"on_screen_text": "semua teks penting yang terlihat di layar (judul slide, subtitle bawaan, kode, harga, nama aplikasi), digabung dan tanpa duplikat", "visual_summary": "2-3 kalimat Bahasa Indonesia: apa yang diperlihatkan video (aktivitas, objek, tampilan aplikasi, langkah)"}
+Jangan mengarang hal yang tidak terlihat. Jika tidak ada teks, "on_screen_text" dikosongkan.`

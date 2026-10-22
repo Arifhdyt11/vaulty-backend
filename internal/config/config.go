@@ -48,6 +48,9 @@ type Config struct {
 	AIChatModel     string
 	AIChatModelPro  string
 	AIVisionModel   string
+	AIVisionBaseURL string // kosong → server chat
+	AIVisionAPIKey  string
+	VideoMaxFrames  int
 	AIEmbedBaseURL  string
 	AIEmbedAPIKey   string
 	AIEmbedModel    string
@@ -106,6 +109,9 @@ func Load() (Config, error) {
 		AIChatModel:     get("AI_CHAT_MODEL", "qwen2.5:7b-instruct"),
 		AIChatModelPro:  get("AI_CHAT_MODEL_PRO", ""),
 		AIVisionModel:   get("AI_VISION_MODEL", ""),
+		AIVisionBaseURL: get("AI_VISION_BASE_URL", ""),
+		AIVisionAPIKey:  get("AI_VISION_API_KEY", ""),
+		VideoMaxFrames:  getInt("VIDEO_MAX_FRAMES", 6),
 		AIEmbedBaseURL:  get("AI_EMBED_BASE_URL", ""),
 		AIEmbedAPIKey:   get("AI_EMBED_API_KEY", ""),
 		AIEmbedModel:    get("AI_EMBED_MODEL", "bge-m3"),
@@ -133,6 +139,9 @@ func Load() (Config, error) {
 	}
 	if c.AIChatModelPro == "" {
 		c.AIChatModelPro = c.AIChatModel
+	}
+	if c.AIVisionBaseURL == "" {
+		c.AIVisionBaseURL, c.AIVisionAPIKey = c.AIBaseURL, c.AIAPIKey
 	}
 	if c.AIVisionModel == "" {
 		c.AIVisionModel = c.AIChatModel

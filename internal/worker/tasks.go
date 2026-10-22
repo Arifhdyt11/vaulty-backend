@@ -47,7 +47,7 @@ func (c *Client) EnqueueIngest(ctx context.Context, itemID, userID int64, versio
 	// TaskID deterministik per versi → enqueue ganda diabaikan (idempoten, ADR-006).
 	_, err := c.c.EnqueueContext(ctx, asynq.NewTask(TaskItemIngest, b),
 		asynq.TaskID(fmt.Sprintf("item-ingest:%d:%d", itemID, version)), asynq.Queue(queue),
-		asynq.MaxRetry(5), asynq.Timeout(10*time.Minute), asynq.Retention(time.Hour))
+		asynq.MaxRetry(5), asynq.Timeout(25*time.Minute), asynq.Retention(time.Hour))
 	if errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}

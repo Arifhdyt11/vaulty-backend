@@ -18,6 +18,7 @@ import (
 	"vaulty/pkg/ai"
 	"vaulty/pkg/extract"
 	"vaulty/pkg/fetch"
+	"vaulty/pkg/media"
 	"vaulty/pkg/storage"
 )
 
@@ -29,6 +30,10 @@ type IngestService struct {
 	store         storage.Storage
 	fetcher       *fetch.Fetcher
 	chat          ai.Chat
+	visionAI      ai.Chat
+	media         *media.Tool
+	maxFrames     int
+	maxVideoMin   int
 	embedder      ai.Embedder
 	stt           ai.Transcriber
 	visionModel   string
@@ -40,21 +45,36 @@ type IngestService struct {
 }
 
 type IngestDeps struct {
-	Repos       *repository.Repos
-	Store       storage.Storage
-	Fetcher     *fetch.Fetcher
-	Chat        ai.Chat
-	Embedder    ai.Embedder
-	STT         ai.Transcriber
-	VisionModel string
-	ChatModel   string
-	Reminders   *ReminderService
-	Entitlement *EntitlementService
-	AIEnabled   bool
+	Repos           *repository.Repos
+	Store           storage.Storage
+	Fetcher         *fetch.Fetcher
+	Chat            ai.Chat
+	Vision          ai.Chat // kosong → Chat
+	Media           *media.Tool
+	VideoMaxFrames  int
+	MaxVideoMinutes int
+	Embedder        ai.Embedder
+	STT             ai.Transcriber
+	VisionModel     string
+	ChatModel       string
+	Reminders       *ReminderService
+	Entitlement     *EntitlementService
+	AIEnabled       bool
 }
 
 func NewIngestService(d IngestDeps) *IngestService {
-	return &IngestService{repos: d.Repos, store: d.Store, fetcher: d.Fetcher, chat: d.Chat, embedder: d.Embedder, stt: d.STT,
+	vision := d.Vision
+	if vision == nil {
+		vision = d.Chat
+	}
+	if d.VideoMaxFrames <= 0 {
+		d.VideoMaxFrames = 6
+	}
+	if d.MaxVideoMinutes <= 0 {
+		d.MaxVideoMinutes = 30
+	}
+	return &IngestService{repos: d.Repos, store: d.Store, fetcher: d.Fetcher, chat: d.Chat, visionAI: vision, media: d.Media,
+		maxFrames: d.VideoMaxFrames, maxVideoMin: d.MaxVideoMinutes, embedder: d.Embedder, stt: d.STT,
 		visionModel: d.VisionModel, chatModel: d.ChatModel, remind: d.Reminders, ent: d.Entitlement, aiOn: d.AIEnabled, fetchCacheTTL: 7 * 24 * time.Hour}
 }
 
@@ -264,10 +284,8 @@ func (s *IngestService) stageTranscribe(ctx context.Context, u model.User, it *m
 		if it.AttachmentKey != nil && *it.AttachmentKey != "" {
 			return s.vision(ctx, u, it, *it.AttachmentKey, true)
 		}
-		if it.ContentText == nil || strings.TrimSpace(*it.ContentText) == "" {
-			if it.ContentType != nil && *it.ContentType == "video" {
-				return model.Stage{Status: "skipped", Error: "transkrip video tanpa caption belum didukung; tambahkan screenshot atau catatan"}
-			}
+		if it.Platform != nil && media.Supported(*it.Platform) {
+			return s.transcribeVideo(ctx, u, it)
 		}
 		return model.Stage{Status: "skipped"}
 	}
@@ -290,7 +308,7 @@ func (s *IngestService) vision(ctx context.Context, u model.User, it *model.Item
 	if !strings.HasPrefix(ct, "image/") {
 		ct = "image/jpeg"
 	}
-	resp, err := s.chat.Complete(ctx, ai.ChatRequest{Model: s.visionModel, System: visionPrompt, JSON: true, MaxTokens: 1500,
+	resp, err := s.visionAI.Complete(ctx, ai.ChatRequest{Model: s.visionModel, System: visionPrompt, JSON: true, MaxTokens: 1500,
 		Messages: []ai.Message{{Role: "user", Content: "Baca gambar ini.", Images: []ai.Image{{MIME: ct, Data: data}}}}})
 	if err != nil {
 		return model.Stage{Status: "failed", Error: "vision: " + ai.Truncate(err.Error(), 200)}
@@ -412,7 +430,7 @@ func (s *IngestService) stageUnderstand(ctx context.Context, u model.User, it *m
 	if !s.aiOn {
 		return model.Stage{Status: "skipped", Error: "AI nonaktif"}
 	}
-	content := buildContent(*it, 12000)
+	content := buildContent(*it, 20000)
 	if strings.TrimSpace(content) == "" {
 		return model.Stage{Status: "skipped", Error: "tidak ada konten untuk diringkas"}
 	}
