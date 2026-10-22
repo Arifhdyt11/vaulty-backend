@@ -423,10 +423,21 @@ func (s *IngestService) stageUnderstand(ctx context.Context, u model.User, it *m
 	var out understandOut
 	parsed := false
 	msgs := []ai.Message{{Role: "user", Content: userMsg}}
-	for attempt := 0; attempt < 2 && !parsed; attempt++ {
-		resp, err := s.chat.Complete(ctx, ai.ChatRequest{Model: s.chatModel, System: understandPrompt, JSON: true, MaxTokens: 1200, Temperature: 0.2, Messages: msgs})
+	// Hermes kadang menjawab kosong/terpotong saat sibuk menerima beberapa permintaan sekaligus;
+	// beri 3 kesempatan dengan jeda.
+	var lastErr error
+	for attempt := 0; attempt < 3 && !parsed; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return model.Stage{Status: "failed", Error: ctx.Err().Error()}
+			case <-time.After(time.Duration(attempt*3) * time.Second):
+			}
+		}
+		resp, err := s.chat.Complete(ctx, ai.ChatRequest{Model: s.chatModel, System: understandPrompt, JSON: true, MaxTokens: 1500, Temperature: 0.2, Messages: msgs})
 		if err != nil {
-			return model.Stage{Status: "failed", Error: "llm: " + ai.Truncate(err.Error(), 200)}
+			lastErr = err
+			continue
 		}
 		if err := ai.ParseJSONLoose(resp.Content, &out); err == nil && strings.TrimSpace(out.Summary) != "" {
 			parsed = true
@@ -436,6 +447,9 @@ func (s *IngestService) stageUnderstand(ctx context.Context, u model.User, it *m
 			ai.Message{Role: "user", Content: "Jawabanmu bukan JSON yang valid. Keluarkan HANYA objek JSON sesuai format yang diminta, tanpa teks lain."})
 	}
 	if !parsed {
+		if lastErr != nil {
+			return model.Stage{Status: "failed", Error: "llm: " + ai.Truncate(lastErr.Error(), 200)}
+		}
 		return model.Stage{Status: "failed", Error: "jawaban LLM bukan JSON"}
 	}
 	p := repository.UnderstandPatch{Summary: strings.TrimSpace(out.Summary), KeyPoints: trimAll(out.KeyPoints, 8), Entities: out.Entities,

@@ -60,3 +60,22 @@ func TestMapV1NoteKosongDilewati(t *testing.T) {
 		t.Fatal("catatan kosong harus dilewati")
 	}
 }
+
+func TestMapV1NoteLinkDiDalamTeks(t *testing.T) {
+	ni, reason := mapV1Note(7, v1Note{ID: 5, Type: "note", Title: sp("macOS"), Body: "https://www.threads.com/@user/post/abc123 tips macOS"})
+	if reason != "" {
+		t.Fatal(reason)
+	}
+	if ni.Kind != "url" || ni.SourceURL == nil || *ni.SourceURL != "https://www.threads.com/@user/post/abc123" || ni.UserNote != "tips macOS" {
+		t.Fatalf("%+v", ni)
+	}
+}
+
+func TestMapV1NoteURLInternalTetapTeks(t *testing.T) {
+	for _, body := range []string{"Hermes di http://hermes:8642/v1", "router http://43.163.100.39:20128/dashboard", "dev http://localhost:9119"} {
+		ni, _ := mapV1Note(7, v1Note{ID: 6, Type: "note", Body: body})
+		if ni.Kind != "text" {
+			t.Fatalf("%q harus tetap teks, dapat %s", body, ni.Kind)
+		}
+	}
+}

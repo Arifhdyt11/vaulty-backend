@@ -127,7 +127,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Result, error) {
 	case "youtube":
 		err = f.fetchYouTube(ctx, &res)
 	case "tiktok":
-		err = f.fetchTikTok(ctx, &res)
+		err = f.fetchTikTok(ctx, &res, rawURL)
 	case "x":
 		err = f.fetchX(ctx, &res)
 	case "instagram", "threads":

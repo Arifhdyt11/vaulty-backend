@@ -40,24 +40,33 @@ func (f *Fetcher) getOEmbed(ctx context.Context, endpoint string, params url.Val
 	return &o, nil
 }
 
-func (f *Fetcher) fetchTikTok(ctx context.Context, res *Result) error {
+func (f *Fetcher) fetchTikTok(ctx context.Context, res *Result, sourceURL string) error {
 	res.ContentType = "video"
 	res.SiteName = "TikTok"
-	o, err := f.getOEmbed(ctx, f.tiktokOEmbed, url.Values{"url": {res.CanonicalURL}})
-	if err != nil {
-		res.warn("oembed tiktok gagal: %v", err)
-		f.tryOG(ctx, res, res.CanonicalURL)
-	} else {
-		// Di TikTok "title" oEmbed adalah caption lengkap, jadi dipakai juga
-		// sebagai Text supaya LLM punya bahan ringkasan.
-		res.Title = o.Title
-		res.Text = o.Title
-		res.Author = o.AuthorName
-		res.ThumbnailURL = o.ThumbnailURL
+	// Halaman TikTok dengan User-Agent pratinjau link memberi og:image + caption, dan ikut
+	// redirect link pendek (vt./vm.tiktok.com). oEmbed kini sering tanpa thumbnail, jadi
+	// hanya dipakai untuk mengisi yang masih kosong.
+	f.tryOGUA(ctx, res, sourceURL, linkPreviewUserAgent)
+	if res.ThumbnailURL == "" || res.Description == "" {
+		if o, err := f.getOEmbed(ctx, f.tiktokOEmbed, url.Values{"url": {res.CanonicalURL}}); err != nil {
+			res.warn("oembed tiktok gagal: %v", err)
+		} else {
+			// Di TikTok "title" oEmbed adalah caption lengkap.
+			setIfEmpty(&res.Description, o.Title)
+			setIfEmpty(&res.Author, o.AuthorName)
+			setIfEmpty(&res.ThumbnailURL, o.ThumbnailURL)
+		}
+	}
+	// og:title TikTok berbentuk "TikTok · username": simpan sebagai author, judul dibuat Vee.
+	if t := strings.TrimSpace(res.Title); strings.HasPrefix(t, "TikTok") {
+		if i := strings.Index(t, "·"); i >= 0 {
+			setIfEmpty(&res.Author, strings.TrimSpace(t[i+len("·"):]))
+		}
+		res.Title = ""
 	}
 	setIfEmpty(&res.Text, res.Description)
-	if res.Title == "" {
-		res.Title = "TikTok video"
+	if res.Text == "" && res.ThumbnailURL == "" {
+		res.warn("isi video TikTok tidak bisa diambil; tambahkan catatan atau screenshot")
 	}
 	return nil
 }

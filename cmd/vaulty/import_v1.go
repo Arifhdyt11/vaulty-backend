@@ -6,6 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	neturl "net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -133,6 +136,14 @@ func mapV1Note(userID int64, n v1Note) (repository.NewItem, string) {
 	if n.URL != nil {
 		url = strings.TrimSpace(*n.URL)
 	}
+	// Bot Telegram v1 sering menyimpan link di dalam teks (kolom url kosong). Link publik
+	// dijadikan item URL supaya thumbnail & isi post diambil; sisa teks menjadi catatan user.
+	if url == "" {
+		if u, rest, ok := extractPublicURL(body); ok {
+			url, body = u, rest
+			n.Type = "link"
+		}
+	}
 	if warn := service.DetectSecret(body, deref(n.Title)); warn != "" {
 		return ni, "terdeteksi berisi credential (ADR-012); salin manual ke password manager bila perlu"
 	}
@@ -164,6 +175,29 @@ func mapV1Note(userID int64, n v1Note) (repository.NewItem, string) {
 	}
 	ni.Tags = service.NormalizeTags(tags)
 	return ni, ""
+}
+
+var urlInText = regexp.MustCompile(`https?://[^\s<>"']+`)
+
+// extractPublicURL mengambil URL pertama di teks bila host-nya domain publik (bukan IP,
+// localhost, atau nama host internal seperti "hermes"). Alamat server internal tetap
+// dibiarkan sebagai catatan teks karena tidak bisa (dan tidak boleh) di-fetch.
+func extractPublicURL(text string) (url, rest string, ok bool) {
+	raw := urlInText.FindString(text)
+	if raw == "" {
+		return "", text, false
+	}
+	raw = strings.TrimRight(raw, ".,;:!?)]}")
+	u, err := neturl.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return "", text, false
+	}
+	host := u.Hostname()
+	if net.ParseIP(host) != nil || host == "localhost" || !strings.Contains(host, ".") {
+		return "", text, false
+	}
+	rest = strings.TrimSpace(strings.Replace(text, raw, "", 1))
+	return raw, rest, true
 }
 
 func trimPtr(s *string) *string {
