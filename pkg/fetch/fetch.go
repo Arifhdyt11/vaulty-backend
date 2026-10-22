@@ -59,8 +59,11 @@ const (
 	defaultMaxBytes = 5 << 20
 	// UA menyerupai browser desktop karena banyak situs (dan oEmbed TikTok)
 	// mengembalikan halaman kosong/403 untuk UA yang terlihat seperti bot.
-	defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-	maxRedirects     = 5
+	// Instagram/Threads memberi halaman login ke browser biasa, tetapi memberi OG lengkap
+	// (teks post + gambar) ke crawler pratinjau link seperti yang dipakai WhatsApp/Facebook.
+	linkPreviewUserAgent = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+	defaultUserAgent     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	maxRedirects         = 5
 	// Batas minimal panjang teks agar dianggap "article", bukan sekadar
 	// halaman landing/login yang hanya punya beberapa kalimat.
 	articleMinChars = 400
@@ -128,7 +131,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Result, error) {
 	case "x":
 		err = f.fetchX(ctx, &res)
 	case "instagram", "threads":
-		err = f.fetchSocialOG(ctx, &res)
+		err = f.fetchSocialOG(ctx, &res, rawURL)
 	default:
 		err = f.fetchWeb(ctx, &res)
 	}
@@ -185,11 +188,16 @@ type page struct {
 // berasal dari guard SSRF dipetakan ke ErrBlocked supaya pemanggil bisa
 // membedakannya dari gangguan jaringan biasa.
 func (f *Fetcher) do(ctx context.Context, rawURL, accept string) (*http.Response, error) {
+	return f.doUA(ctx, rawURL, accept, f.opts.UserAgent)
+}
+
+// doUA sama dengan do, dengan User-Agent tertentu (mis. crawler pratinjau link).
+func (f *Fetcher) doUA(ctx context.Context, rawURL, accept, ua string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, ErrInvalidURL
 	}
-	req.Header.Set("User-Agent", f.opts.UserAgent)
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", accept)
 	req.Header.Set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
 	resp, err := f.client.Do(req)
@@ -204,7 +212,11 @@ func (f *Fetcher) do(ctx context.Context, rawURL, accept string) (*http.Response
 
 // getPage mengambil halaman dan membaca body dengan batas ukuran.
 func (f *Fetcher) getPage(ctx context.Context, rawURL string) (*page, error) {
-	resp, err := f.do(ctx, rawURL, "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
+	return f.getPageUA(ctx, rawURL, f.opts.UserAgent)
+}
+
+func (f *Fetcher) getPageUA(ctx context.Context, rawURL, ua string) (*page, error) {
+	resp, err := f.doUA(ctx, rawURL, "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", ua)
 	if err != nil {
 		return nil, err
 	}

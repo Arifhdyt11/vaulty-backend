@@ -177,7 +177,8 @@ func TestFinalStatus(t *testing.T) {
 		t.Fatal("partial")
 	}
 	failed := model.Item{Kind: "url", Ingest: model.Ingest{Fetch: model.Stage{Status: "failed"}, Transcribe: model.Stage{Status: "skipped"}, Understand: model.Stage{Status: "skipped"}, Index: model.Stage{Status: "skipped"}}}
-	if finalStatus(failed) != "failed" {
-		t.Fatal("failed")
+	// URL tetap tersimpan walau fetch gagal → partial (app menawarkan screenshot).
+	if finalStatus(failed) != "partial" {
+		t.Fatal("partial")
 	}
 }

@@ -11,3 +11,4 @@ service-account*.json
 .DS_Store
 coverage.out
 .claude/settings.local.json
+dev-accounts.local.txt

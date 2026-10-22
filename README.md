@@ -48,12 +48,23 @@ Model Ollama default: `ollama pull qwen2.5:7b-instruct` (chat) dan `ollama pull 
 
 Push butuh `FCM_CREDENTIALS_FILE` (service account Firebase). Billing butuh `REVENUECAT_WEBHOOK_SECRET` (+ `REVENUECAT_API_KEY` untuk `/billing/sync`).
 
+## Impor catatan Vaulty v1
+
+```bash
+ssh sipantas "docker exec shared-postgres pg_dump -U vaulty -d vaulty -t notes --data-only --column-inserts" > notes-v1.sql
+scripts/import-v1.sh notes-v1.sql email@anda.com           # pratinjau
+scripts/import-v1.sh notes-v1.sql email@anda.com --apply   # impor (idempoten, tanpa kuota)
+```
+
+Note → item teks, link → item URL (di-fetch ulang), command → item teks verbatim bertag `command`. Catatan berisi pola credential dilewati dan dilaporkan.
+
 ## Perintah lain
 
 ```bash
 make verify      # gofmt + go vet + go test
 make openapi     # simpan openapi.json dari API yang sedang jalan
 make build       # binary ke ./bin/vaulty
+go run ./cmd/vaulty requeue   # enqueue ulang item yang macet di queued/processing
 ```
 
 ## Status

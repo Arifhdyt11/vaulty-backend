@@ -389,3 +389,7 @@ func detectSecret(texts ...string) string {
 	}
 	return ""
 }
+
+// DetectSecret dan NormalizeTags diekspor untuk alat impor (cmd/vaulty import-v1).
+func DetectSecret(texts ...string) string  { return detectSecret(texts...) }
+func NormalizeTags(tags []string) []string { return normalizeTags(tags) }

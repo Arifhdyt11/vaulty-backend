@@ -143,8 +143,6 @@ func finalStatus(it model.Item) string {
 	switch {
 	case failed == 0:
 		return "ready"
-	case done == 0 && it.Kind == "url" && it.Ingest.Fetch.Status == "failed":
-		return "failed"
 	default:
 		return "partial"
 	}
@@ -156,19 +154,23 @@ func (s *IngestService) stageFetch(ctx context.Context, u model.User, it *model.
 	if it.Kind != "url" || it.SourceURL == nil {
 		return model.Stage{Status: "skipped"}
 	}
-	url := *it.SourceURL
+	// Cache memakai URL kanonik; fetch memakai URL asli supaya link share (mis. threads /share/) bisa redirect.
+	key := *it.SourceURL
 	if it.CanonicalURL != nil && *it.CanonicalURL != "" {
-		url = *it.CanonicalURL
+		key = *it.CanonicalURL
 	}
 	var res fetch.Result
-	hit, _ := s.repos.Cache.Get(ctx, url, s.fetchCacheTTL, &res)
+	hit, _ := s.repos.Cache.Get(ctx, key, s.fetchCacheTTL, &res)
 	if !hit {
 		var err error
-		res, err = s.fetcher.Fetch(ctx, url)
+		res, err = s.fetcher.Fetch(ctx, *it.SourceURL)
 		if err != nil {
 			return model.Stage{Status: "failed", Error: ai.Truncate(err.Error(), 300)}
 		}
-		_ = s.repos.Cache.Put(ctx, url, res)
+		// Hasil tanpa isi (halaman login/privat) tidak di-cache supaya bisa dicoba lagi.
+		if strings.TrimSpace(res.Text) != "" || strings.TrimSpace(res.Transcript) != "" {
+			_ = s.repos.Cache.Put(ctx, key, res)
+		}
 	}
 	p := repository.FetchResultPatch{DurationSec: res.Duration, PublishedAt: res.PublishedAt}
 	setIf(&p.CanonicalURL, res.CanonicalURL)

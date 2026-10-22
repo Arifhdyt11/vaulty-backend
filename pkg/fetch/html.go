@@ -291,23 +291,64 @@ func (f *Fetcher) extractArticle(res *Result, m *meta, pageURL *url.URL) (text s
 	return txt
 }
 
-// fetchSocialOG: Instagram/Threads biasanya hanya memberi OG terbatas (dan
-// sering halaman login). Apa pun yang gagal hanya jadi warning; item tetap
-// tersimpan dengan judul minimal dan app bisa minta screenshot ke user.
-func (f *Fetcher) fetchSocialOG(ctx context.Context, res *Result) error {
+// fetchSocialOG: Instagram/Threads. Halaman diminta dengan User-Agent crawler pratinjau
+// link karena browser biasa hanya mendapat halaman login. Bila tetap tidak ada teks post,
+// judul dikosongkan supaya tahap fetch dianggap gagal dan app menawarkan screenshot.
+func (f *Fetcher) fetchSocialOG(ctx context.Context, res *Result, sourceURL string) error {
 	res.ContentType = "post"
 	res.SiteName = platformSiteName(res.Platform)
-	f.tryOG(ctx, res, res.CanonicalURL)
-	if res.Title == "" {
-		res.Title = res.SiteName + " post"
+	// Pakai URL asli (mis. link /share/ Threads) supaya redirect ke post sebenarnya diikuti.
+	f.tryOGUA(ctx, res, sourceURL, linkPreviewUserAgent)
+	if res.Description == "" && res.Title == "" {
+		f.tryOGUA(ctx, res, res.CanonicalURL, linkPreviewUserAgent)
 	}
+	res.Description = socialCaption(res.Description)
+	if res.Description == "" {
+		if isGenericSocialTitle(res.Title, res.SiteName) {
+			res.Title = ""
+		}
+		res.warn("teks post %s tidak bisa diambil (mungkin privat); tambahkan screenshot", res.SiteName)
+		return nil
+	}
+	// og:title Instagram/Threads berbentuk "Nama (@user) on Threads: ..." dan tidak enak
+	// dijadikan judul. Simpan nama akunnya sebagai author; judul dibuat Vee dari isi post.
+	setIfEmpty(&res.Author, socialAuthor(res.Title))
+	res.Title = ""
 	setIfEmpty(&res.Text, res.Description)
 	return nil
 }
 
+// socialAuthor mengambil bagian sebelum " on <Platform>" / " di <Platform>".
+func socialAuthor(title string) string {
+	for _, sep := range []string{" on Threads", " di Threads", " on Instagram", " di Instagram"} {
+		if i := strings.Index(title, sep); i > 0 {
+			return strings.Trim(strings.TrimSpace(title[:i]), ". ")
+		}
+	}
+	return ""
+}
+
+// socialCaption membuang prefiks statistik Instagram ("335 likes, 58 comments - user on June 3, 2026: ").
+func socialCaption(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ": "); i > 0 && i < 120 && (strings.Contains(s[:i], " likes") || strings.Contains(s[:i], " comments") || strings.Contains(s[:i], " suka")) {
+		s = strings.TrimSpace(s[i+2:])
+	}
+	return strings.Trim(s, "\"“” ")
+}
+
+func isGenericSocialTitle(title, site string) bool {
+	t := strings.TrimSpace(strings.ToLower(title))
+	return t == "" || t == strings.ToLower(site) || t == strings.ToLower(site)+" post" || strings.HasPrefix(t, "log in") || strings.HasPrefix(t, "masuk")
+}
+
 // tryOG best-effort: ambil halaman dan isi meta. Tidak pernah mengembalikan error.
 func (f *Fetcher) tryOG(ctx context.Context, res *Result, pageURL string) {
-	p, err := f.getPage(ctx, pageURL)
+	f.tryOGUA(ctx, res, pageURL, f.opts.UserAgent)
+}
+
+func (f *Fetcher) tryOGUA(ctx context.Context, res *Result, pageURL, ua string) {
+	p, err := f.getPageUA(ctx, pageURL, ua)
 	if err != nil {
 		res.warn("ambil halaman %s gagal: %v", res.Platform, err)
 		return
