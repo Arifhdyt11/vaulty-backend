@@ -638,7 +638,7 @@ func briefingOpening(greeting string) string {
 	if greeting == "" {
 		greeting = "Halo"
 	}
-	return greeting + "! Ini siaran Vee hari ini."
+	return greeting + "! Ini Cerita Vee hari ini."
 }
 
 var angka = []string{"nol", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan", "sembilan", "sepuluh", "sebelas", "dua belas"}

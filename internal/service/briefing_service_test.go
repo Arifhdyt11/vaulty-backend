@@ -146,7 +146,7 @@ func TestSalamPerJam(t *testing.T) {
 	if got := briefingGreeting(time.Date(2026, 10, 23, 8, 0, 0, 0, loc), ""); got != "Selamat pagi" {
 		t.Errorf("tanpa nama: %q", got)
 	}
-	if got := briefingOpening("Selamat pagi, Arif"); got != "Selamat pagi, Arif! Ini siaran Vee hari ini." {
+	if got := briefingOpening("Selamat pagi, Arif"); got != "Selamat pagi, Arif! Ini Cerita Vee hari ini." {
 		t.Errorf("pembuka: %q", got)
 	}
 }
@@ -180,8 +180,8 @@ func TestBahanNaskahBerisiInfoYangBenar(t *testing.T) {
 	content := strings.Repeat("x", 3000)
 	it := model.Item{Kind: "url", Platform: &tt, Title: sp("Widget Apps untuk produktivitas"), UserNote: "buat setup HP baru",
 		Summary: sp("Kumpulan widget iOS minimalis."), KeyPoints: []string{"12 widget iOS", "gratis semua"}, ContentText: &content}
-	in := briefingScriptInput(it, "Selamat pagi, Arif! Ini siaran Vee hari ini.", "kemarin")
-	for _, want := range []string{"PEMBUKA: Selamat pagi, Arif! Ini siaran Vee hari ini.", "DISIMPAN: kemarin", "JENIS: video TikTok",
+	in := briefingScriptInput(it, "Selamat pagi, Arif! Ini Cerita Vee hari ini.", "kemarin")
+	for _, want := range []string{"PEMBUKA: Selamat pagi, Arif! Ini Cerita Vee hari ini.", "DISIMPAN: kemarin", "JENIS: video TikTok",
 		"JUDUL: Widget Apps untuk produktivitas", "ALASAN USER: buat setup HP baru", "RINGKASAN: Kumpulan widget iOS minimalis.",
 		"- 12 widget iOS", "- gratis semua", "AWAL ISI:"} {
 		if !strings.Contains(in, want) {
@@ -209,7 +209,7 @@ func TestBersihkanNaskahDanPembuka(t *testing.T) {
 	if got != "Kemarin kamu menyimpan video TikTok tentang widget. Coba pasang satu malam ini!" {
 		t.Fatalf("bersih: %q", got)
 	}
-	opening := "Selamat pagi, Arif! Ini siaran Vee hari ini."
+	opening := "Selamat pagi, Arif! Ini Cerita Vee hari ini."
 	if got := withOpening("Kemarin kamu menyimpan…", opening); !strings.HasPrefix(got, opening) {
 		t.Fatalf("pembuka harus ditambahkan: %q", got)
 	}
