@@ -15,6 +15,7 @@ const (
 	TaskItemIngest    = "item:ingest"
 	TaskAccountDelete = "account:delete"
 	TaskExportBuild   = "export:build"
+	TaskBriefingBuild = "briefing:build"
 )
 
 type IngestPayload struct {
@@ -32,7 +33,12 @@ type ExportPayload struct {
 	UserID int64 `json:"user_id"`
 }
 
-// Client mengimplementasikan service.Enqueuer.
+type BriefingPayload struct {
+	BriefingID int64 `json:"briefing_id"`
+	UserID     int64 `json:"user_id"`
+}
+
+// Client mengimplementasikan service.Enqueuer dan service.BriefingQueue.
 type Client struct{ c *asynq.Client }
 
 func NewClient(redisOpt asynq.RedisConnOpt) *Client { return &Client{c: asynq.NewClient(redisOpt)} }
@@ -68,6 +74,22 @@ func (c *Client) EnqueueExport(ctx context.Context, jobID, userID int64) error {
 	b, _ := json.Marshal(ExportPayload{JobID: jobID, UserID: userID})
 	_, err := c.c.EnqueueContext(ctx, asynq.NewTask(TaskExportBuild, b), asynq.TaskID(fmt.Sprintf("export:%d", jobID)),
 		asynq.Queue("low"), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
+	return err
+}
+
+// EnqueueBriefing menjadwalkan naskah + suara Siaran Vee (ADR-016). TaskID per siaran: GET yang
+// berulang selama status building tidak menggandakan task yang masih antre/berjalan. Tanpa Retention
+// supaya build bisa dijadwalkan lagi setelah selesai bila masih ada bab pending.
+func (c *Client) EnqueueBriefing(ctx context.Context, briefingID, userID int64, queue string) error {
+	b, _ := json.Marshal(BriefingPayload{BriefingID: briefingID, UserID: userID})
+	if queue == "" {
+		queue = "default"
+	}
+	_, err := c.c.EnqueueContext(ctx, asynq.NewTask(TaskBriefingBuild, b), asynq.TaskID(fmt.Sprintf("briefing:%d", briefingID)),
+		asynq.Queue(queue), asynq.MaxRetry(3), asynq.Timeout(15*time.Minute))
 	if errors.Is(err, asynq.ErrTaskIDConflict) {
 		return nil
 	}

@@ -235,3 +235,34 @@ type Subscription struct {
 	PeriodEnd   *time.Time
 	Raw         json.RawMessage
 }
+
+// Briefing adalah Siaran Vee satu hari (zona waktu user) berisi beberapa bab audio (ADR-016).
+type Briefing struct {
+	ID               int64             `json:"id"`
+	UserID           int64             `json:"-"`
+	Date             string            `json:"date" doc:"YYYY-MM-DD di zona waktu user"`
+	Status           string            `json:"status" enum:"building,ready,failed,empty" doc:"empty = belum ada simpanan siap"`
+	Greeting         string            `json:"greeting"`
+	Chapters         []BriefingChapter `json:"chapters"`
+	TotalDurationSec int               `json:"total_duration_sec" doc:"Jumlah durasi bab yang sudah siap"`
+	GeneratedAt      time.Time         `json:"generated_at"`
+	CreatedAt        time.Time         `json:"-"`
+}
+
+// BriefingChapter: satu simpanan yang dibacakan Vee. Field *Key internal, tidak keluar ke JSON.
+type BriefingChapter struct {
+	ID          int64   `json:"-"`
+	Seq         int     `json:"-"`
+	Index       int     `json:"index" doc:"Mulai 1"`
+	ItemID      int64   `json:"-"`
+	Item        Card    `json:"item"`
+	Label       string  `json:"label" doc:"Tag utama / platform, huruf kalimat"`
+	Title       string  `json:"title"`
+	Quote       string  `json:"quote" doc:"Satu kalimat pendek dari poin penting"`
+	Script      string  `json:"script" doc:"Naskah lisan; kosong selama dibuat"`
+	AudioKey    *string `json:"-"`
+	AudioURL    *string `json:"audio_url" doc:"Signed URL audio/mp4 (AAC); null selama dibuat"`
+	DurationSec int     `json:"duration_sec" doc:"0 selama dibuat"`
+	Status      string  `json:"status" enum:"pending,ready,failed"`
+	Error       string  `json:"-"`
+}

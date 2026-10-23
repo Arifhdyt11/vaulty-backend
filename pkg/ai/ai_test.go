@@ -72,3 +72,63 @@ func TestDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSpeakFallbackSaatModelUtama5xx(t *testing.T) {
+	var models []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/audio/speech" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer tts" {
+			t.Errorf("auth header TTS hilang")
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		models = append(models, body["model"].(string)+"/"+body["voice"].(string))
+		if body["input"] != "halo" || body["response_format"] != "mp3" {
+			t.Errorf("body %v", body)
+		}
+		if body["model"] == "gemini/tts" {
+			http.Error(w, "upstream error", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/mp3")
+		_, _ = w.Write(make([]byte, 1024))
+	}))
+	defer srv.Close()
+	c := New(Config{Chat: Endpoint{BaseURL: "http://chat.invalid"}, Embed: Endpoint{BaseURL: srv.URL, APIKey: "tts"},
+		TTSModel: "gemini/tts", TTSVoice: "Leda", TTSFallbackModel: "openai/nova", TTSFallbackVoice: "nova"})
+	data, mime, err := c.Speak(context.Background(), "halo", "")
+	if err != nil || len(data) != 1024 || mime != "audio/mp3" {
+		t.Fatalf("speak: %v %d %q", err, len(data), mime)
+	}
+	if strings.Join(models, ",") != "gemini/tts/Leda,openai/nova/nova" {
+		t.Fatalf("urutan model: %v", models)
+	}
+}
+
+func TestSpeakModelUtamaBerhasilDanKeduanyaGagal(t *testing.T) {
+	fail := false
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write(make([]byte, 2048))
+	}))
+	defer srv.Close()
+	c := New(Config{TTS: Endpoint{BaseURL: srv.URL}, TTSModel: "a", TTSFallbackModel: "b", TTSFallbackVoice: "nova"})
+	if _, mime, err := c.Speak(context.Background(), "halo", "Leda"); err != nil || mime != "audio/wav" || calls != 1 {
+		t.Fatalf("utama: %v %q calls=%d", err, mime, calls)
+	}
+	fail, calls = true, 0
+	if _, _, err := c.Speak(context.Background(), "halo", ""); err == nil || calls != 2 {
+		t.Fatalf("harus gagal setelah 2 percobaan: %v calls=%d", err, calls)
+	}
+	if _, _, err := New(Config{}).Speak(context.Background(), "halo", ""); err != ErrDisabled {
+		t.Fatalf("tanpa endpoint harus ErrDisabled: %v", err)
+	}
+}

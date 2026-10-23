@@ -28,11 +28,12 @@ type PlanRules struct {
 	STTMaxMinutes    int           // per item
 	AISuggestReminds bool
 	QueuePriority    string // asynq queue
+	BriefingChapters int    // jumlah bab Siaran Vee per hari (ADR-016)
 }
 
 var planRules = map[string]PlanRules{
-	"free": {MaxUploadMB: 5, TrashRetention: 7 * 24 * time.Hour, ChatHistory: 7 * 24 * time.Hour, STTMaxMinutes: 0, AISuggestReminds: false, QueuePriority: "default"},
-	"pro":  {MaxUploadMB: 50, TrashRetention: 30 * 24 * time.Hour, ChatHistory: 0, STTMaxMinutes: 30, AISuggestReminds: true, QueuePriority: "critical"},
+	"free": {MaxUploadMB: 5, TrashRetention: 7 * 24 * time.Hour, ChatHistory: 7 * 24 * time.Hour, STTMaxMinutes: 0, AISuggestReminds: false, QueuePriority: "default", BriefingChapters: 3},
+	"pro":  {MaxUploadMB: 50, TrashRetention: 30 * 24 * time.Hour, ChatHistory: 0, STTMaxMinutes: 30, AISuggestReminds: true, QueuePriority: "critical", BriefingChapters: 5},
 }
 
 func RulesFor(plan string) PlanRules {
@@ -186,7 +187,7 @@ func (s *EntitlementService) Plans(ctx context.Context) ([]PlanInfo, error) {
 		out = append(out, PlanInfo{Plan: p, Limits: byPlan[p], Rules: map[string]any{
 			"max_upload_mb": r.MaxUploadMB, "trash_days": int(r.TrashRetention.Hours() / 24),
 			"chat_history_days": int(r.ChatHistory.Hours() / 24), "stt_max_minutes_per_item": r.STTMaxMinutes,
-			"ai_suggested_reminders": r.AISuggestReminds,
+			"ai_suggested_reminders": r.AISuggestReminds, "briefing_chapters": r.BriefingChapters,
 		}})
 	}
 	return out, nil

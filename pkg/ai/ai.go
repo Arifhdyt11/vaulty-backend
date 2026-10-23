@@ -1,5 +1,5 @@
-// Package ai: client untuk API kompatibel OpenAI. Tiga kemampuan (chat multimodal, embedding,
-// speech-to-text) boleh menunjuk server berbeda (ADR-005). Tidak ada SDK vendor.
+// Package ai: client untuk API kompatibel OpenAI. Empat kemampuan (chat multimodal, embedding,
+// speech-to-text, text-to-speech) boleh menunjuk server berbeda (ADR-005). Tidak ada SDK vendor.
 package ai
 
 import (
@@ -60,6 +60,11 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, audio io.Reader, filename, language string) (string, error)
 }
 
+// Speaker mengubah teks menjadi audio (text-to-speech). Mengembalikan byte audio dan MIME-nya.
+type Speaker interface {
+	Speak(ctx context.Context, text, voice string) ([]byte, string, error)
+}
+
 type Endpoint struct {
 	BaseURL string
 	APIKey  string
@@ -73,8 +78,14 @@ type Config struct {
 	EmbedDim   int
 	STT        Endpoint // kosong → pakai Chat
 	STTModel   string
-	Timeout    time.Duration
-	HTTP       *http.Client
+	// TTS: endpoint /audio/speech. Model utama gagal → coba model cadangan dengan suaranya sendiri.
+	TTS              Endpoint // kosong → pakai Embed
+	TTSModel         string
+	TTSVoice         string
+	TTSFallbackModel string
+	TTSFallbackVoice string
+	Timeout          time.Duration
+	HTTP             *http.Client
 }
 
 type Client struct {
@@ -88,6 +99,9 @@ func New(cfg Config) *Client {
 	}
 	if cfg.STT.BaseURL == "" {
 		cfg.STT = cfg.Chat
+	}
+	if cfg.TTS.BaseURL == "" {
+		cfg.TTS = cfg.Embed
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 120 * time.Second
@@ -299,6 +313,66 @@ func (c *Client) Transcribe(ctx context.Context, audio io.Reader, filename, lang
 		return "", fmt.Errorf("transcribe: decode: %w", err)
 	}
 	return strings.TrimSpace(out.Text), nil
+}
+
+// Speak memanggil POST /audio/speech. voice kosong → TTSVoice. Bila model utama gagal (5xx, batas
+// kuota, jaringan) dicoba TTSFallbackModel dengan TTSFallbackVoice. Format keluaran bergantung model
+// (mis. Gemini mengembalikan audio/wav walau diminta mp3), jadi MIME dari header dikembalikan apa adanya.
+func (c *Client) Speak(ctx context.Context, text, voice string) ([]byte, string, error) {
+	if c == nil || c.cfg.TTS.BaseURL == "" || c.cfg.TTSModel == "" {
+		return nil, "", ErrDisabled
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, "", fmt.Errorf("speech: teks kosong")
+	}
+	if voice == "" {
+		voice = c.cfg.TTSVoice
+	}
+	data, mime, err := c.speak(ctx, c.cfg.TTSModel, voice, text)
+	if err == nil || c.cfg.TTSFallbackModel == "" || ctx.Err() != nil {
+		return data, mime, err
+	}
+	data, mime, err2 := c.speak(ctx, c.cfg.TTSFallbackModel, c.cfg.TTSFallbackVoice, text)
+	if err2 != nil {
+		return nil, "", fmt.Errorf("%w; cadangan: %v", err, err2)
+	}
+	return data, mime, nil
+}
+
+func (c *Client) speak(ctx context.Context, model, voice, text string) ([]byte, string, error) {
+	body := map[string]any{"model": model, "input": text, "response_format": "mp3"}
+	if voice != "" {
+		body["voice"] = voice
+	}
+	req, err := c.newRequest(ctx, c.cfg.TTS, "/audio/speech", body)
+	if err != nil {
+		return nil, "", err
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("speech %s: %w", model, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
+		return nil, "", fmt.Errorf("speech %s: status %d: %s", model, res.StatusCode, Truncate(strings.TrimSpace(string(b)), 300))
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, 30<<20))
+	if err != nil {
+		return nil, "", fmt.Errorf("speech %s: baca audio: %w", model, err)
+	}
+	mime := strings.TrimSpace(strings.Split(res.Header.Get("Content-Type"), ";")[0])
+	// Sebagian proxy mengirim error sebagai JSON dengan status 200.
+	if strings.HasPrefix(mime, "application/json") || strings.HasPrefix(mime, "text/") {
+		return nil, "", fmt.Errorf("speech %s: respons bukan audio: %s", model, Truncate(strings.TrimSpace(string(data)), 300))
+	}
+	if len(data) < 256 {
+		return nil, "", fmt.Errorf("speech %s: audio kosong", model)
+	}
+	if mime == "" || mime == "application/octet-stream" {
+		mime = "audio/mpeg"
+	}
+	return data, mime, nil
 }
 
 func (c *Client) newRequest(ctx context.Context, ep Endpoint, path string, body any) (*http.Request, error) {

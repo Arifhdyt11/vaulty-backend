@@ -59,6 +59,13 @@ type Config struct {
 	AISTTAPIKey     string
 	AISTTModel      string
 	AIMaxSTTMinutes int
+	// Text-to-speech Siaran Vee (ADR-016): /audio/speech kompatibel OpenAI, default server embedding (9router).
+	AITTSBaseURL       string
+	AITTSAPIKey        string
+	AITTSModel         string
+	AITTSVoice         string
+	AITTSFallbackModel string
+	AITTSFallbackVoice string
 
 	FetchAllowPrivate bool
 
@@ -121,6 +128,13 @@ func Load() (Config, error) {
 		AISTTModel:      get("AI_STT_MODEL", "whisper-1"),
 		AIMaxSTTMinutes: getInt("AI_MAX_STT_MINUTES", 30),
 
+		AITTSBaseURL:       get("AI_TTS_BASE_URL", ""),
+		AITTSAPIKey:        get("AI_TTS_API_KEY", ""),
+		AITTSModel:         get("AI_TTS_MODEL", "gemini/gemini-2.5-flash-preview-tts"),
+		AITTSVoice:         get("AI_TTS_VOICE", "Leda"),
+		AITTSFallbackModel: get("AI_TTS_FALLBACK_MODEL", "openai/nova"),
+		AITTSFallbackVoice: get("AI_TTS_FALLBACK_VOICE", "nova"),
+
 		FetchAllowPrivate: getBool("FETCH_ALLOW_PRIVATE", false),
 
 		FCMCredentialsFile: get("FCM_CREDENTIALS_FILE", ""),
@@ -142,6 +156,12 @@ func Load() (Config, error) {
 	}
 	if c.AIVisionBaseURL == "" {
 		c.AIVisionBaseURL, c.AIVisionAPIKey = c.AIBaseURL, c.AIAPIKey
+	}
+	if c.AITTSBaseURL == "" {
+		c.AITTSBaseURL = c.AIEmbedBaseURL
+		if c.AITTSAPIKey == "" {
+			c.AITTSAPIKey = c.AIEmbedAPIKey
+		}
 	}
 	if c.AIVisionModel == "" {
 		c.AIVisionModel = c.AIChatModel

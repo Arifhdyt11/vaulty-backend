@@ -69,6 +69,11 @@ func (s *AccountService) PurgeAccount(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
+	audio, err := s.repos.Briefing.AudioKeys(ctx, userID)
+	if err != nil {
+		return err
+	}
+	keys = append(keys, audio...)
 	for _, k := range keys {
 		if err := s.store.Delete(ctx, k); err != nil {
 			slog.WarnContext(ctx, "hapus objek gagal", "key", k, "err", err)

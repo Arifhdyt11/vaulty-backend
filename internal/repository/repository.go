@@ -31,6 +31,7 @@ type Repos struct {
 	Billing  *BillingRepo
 	Audit    *AuditRepo
 	Cache    *FetchCacheRepo
+	Briefing *BriefingRepo
 }
 
 func New(pool *pgxpool.Pool) *Repos {
@@ -46,6 +47,7 @@ func New(pool *pgxpool.Pool) *Repos {
 		Billing:  &BillingRepo{db: pool},
 		Audit:    &AuditRepo{db: pool},
 		Cache:    &FetchCacheRepo{db: pool},
+		Briefing: &BriefingRepo{db: pool},
 	}
 }
 
@@ -70,6 +72,7 @@ func (r *Repos) Tx(ctx context.Context, fn func(tx *Repos) error) error {
 		Billing:  &BillingRepo{db: tx},
 		Audit:    &AuditRepo{db: tx},
 		Cache:    &FetchCacheRepo{db: tx},
+		Briefing: &BriefingRepo{db: tx},
 	}
 	if err := fn(tr); err != nil {
 		return err

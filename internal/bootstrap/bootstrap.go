@@ -40,15 +40,16 @@ type App struct {
 	Queue      *worker.Client
 	Push       push.Sender
 
-	Auth    *service.AuthService
-	Ent     *service.EntitlementService
-	Remind  *service.ReminderService
-	Items   *service.ItemService
-	Search  *service.SearchService
-	Answer  *service.AnswerService
-	Ingest  *service.IngestService
-	Billing *service.BillingService
-	Account *service.AccountService
+	Auth     *service.AuthService
+	Ent      *service.EntitlementService
+	Remind   *service.ReminderService
+	Items    *service.ItemService
+	Search   *service.SearchService
+	Answer   *service.AnswerService
+	Ingest   *service.IngestService
+	Billing  *service.BillingService
+	Account  *service.AccountService
+	Briefing *service.BriefingService
 }
 
 func Logger(cfg config.Config) {
@@ -96,6 +97,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		Chat: ai.Endpoint{BaseURL: cfg.AIBaseURL, APIKey: cfg.AIAPIKey}, ChatModel: cfg.AIChatModel,
 		Embed: ai.Endpoint{BaseURL: cfg.AIEmbedBaseURL, APIKey: cfg.AIEmbedAPIKey}, EmbedModel: cfg.AIEmbedModel, EmbedDim: cfg.AIEmbedDim,
 		STT: ai.Endpoint{BaseURL: cfg.AISTTBaseURL, APIKey: cfg.AISTTAPIKey}, STTModel: cfg.AISTTModel,
+		TTS: ai.Endpoint{BaseURL: cfg.AITTSBaseURL, APIKey: cfg.AITTSAPIKey}, TTSModel: cfg.AITTSModel, TTSVoice: cfg.AITTSVoice,
+		TTSFallbackModel: cfg.AITTSFallbackModel, TTSFallbackVoice: cfg.AITTSFallbackVoice,
 		HTTP: &http.Client{Timeout: 180 * time.Second},
 	})
 	a.AIOn = a.AI.Enabled()
@@ -139,9 +142,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// jadi vision diarahkan langsung ke 9router (ADR-015).
 	vision := ai.New(ai.Config{Chat: ai.Endpoint{BaseURL: cfg.AIVisionBaseURL, APIKey: cfg.AIVisionAPIKey}, ChatModel: cfg.AIVisionModel,
 		EmbedDim: cfg.AIEmbedDim, HTTP: &http.Client{Timeout: 180 * time.Second}})
+	mediaTool := media.New(media.Options{})
 	a.Ingest = service.NewIngestService(service.IngestDeps{Repos: a.Repos, Store: a.Store, Fetcher: fetcher, Chat: a.AI, Vision: vision, Embedder: a.AI, STT: a.AI,
-		Media: media.New(media.Options{}), VideoMaxFrames: cfg.VideoMaxFrames, MaxVideoMinutes: cfg.AIMaxSTTMinutes,
+		Media: mediaTool, VideoMaxFrames: cfg.VideoMaxFrames, MaxVideoMinutes: cfg.AIMaxSTTMinutes,
 		VisionModel: cfg.AIVisionModel, ChatModel: cfg.AIChatModel, Reminders: a.Remind, Entitlement: a.Ent, AIEnabled: a.AIOn})
+	// Siaran Vee: naskah lewat chat (Hermes), suara lewat TTS 9router (ADR-016).
+	a.Briefing = service.NewBriefingService(service.BriefingDeps{Repos: a.Repos, Items: a.Items, Store: a.Store, Queue: a.Queue,
+		Chat: a.AI, ChatModel: cfg.AIChatModel, TTS: a.AI, Media: mediaTool, AIEnabled: a.AIOn})
 	return a, nil
 }
 

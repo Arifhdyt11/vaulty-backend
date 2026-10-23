@@ -71,7 +71,7 @@ func runAPI(ctx context.Context, cfg config.Config) error {
 	defer app.Close()
 
 	h := &v1.Handlers{Auth: app.Auth, Account: app.Account, Items: app.Items, Search: app.Search, Answer: app.Answer, Remind: app.Remind,
-		Ent: app.Ent, Billing: app.Billing, Repos: app.Repos.Access(), WebhookSecret: cfg.RevenueCatWebhookSecret}
+		Ent: app.Ent, Billing: app.Billing, Briefing: app.Briefing, Repos: app.Repos.Access(), WebhookSecret: cfg.RevenueCatWebhookSecret}
 	mux := router.New(router.Deps{
 		Handlers: h, Auth: app.Auth,
 		ReadyDB:    func(c context.Context) error { return app.Pool.Ping(c) },
@@ -99,7 +99,7 @@ func runWorker(ctx context.Context, cfg config.Config) error {
 	}
 	defer app.Close()
 	srv := worker.NewServer(app.RedisOpt, cfg.WorkerConcurrency, worker.Deps{
-		Ingest: app.Ingest, Account: app.Account, Reminders: app.Remind, Auth: app.Auth, Billing: app.Billing,
+		Ingest: app.Ingest, Account: app.Account, Briefing: app.Briefing, Reminders: app.Remind, Auth: app.Auth, Billing: app.Billing,
 		Chats: app.Repos.Chats, Items: app.Repos.Items, Push: app.Push, Queue: app.Queue, Store: app.Store,
 	})
 	slog.Info("worker started", "concurrency", cfg.WorkerConcurrency, "ai", app.AIOn)

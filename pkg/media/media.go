@@ -1,5 +1,6 @@
 // Package media: unduh video dari platform (yt-dlp) lalu ambil audio dan frame (ffmpeg)
-// supaya isi video bisa ditranskrip dan dibaca model vision (ADR-015).
+// supaya isi video bisa ditranskrip dan dibaca model vision (ADR-015), serta konversi audio
+// Siaran Vee ke AAC (ADR-016).
 // Paket ini memanggil binary eksternal; tidak ada dependency Go tambahan.
 package media
 
@@ -72,6 +73,33 @@ func (t *Tool) Available() bool {
 		}
 	}
 	return true
+}
+
+// CanTranscode: ffmpeg + ffprobe tersedia (cukup untuk ToAAC dan Duration, tanpa yt-dlp).
+func (t *Tool) CanTranscode() bool {
+	for _, b := range []string{t.opts.FFmpegPath, t.opts.FFprobePath} {
+		if _, err := exec.LookPath(b); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// ToAAC mengubah audio apa pun (wav/mp3 dari TTS) menjadi AAC mono 64 kbps dalam kontainer MP4
+// (.m4a, audio/mp4) yang diputar native di iOS & Android. Volume dinormalkan (loudnorm) supaya
+// bab dari model TTS berbeda terdengar sama keras; moov di depan supaya bisa diputar sambil diunduh.
+func (t *Tool) ToAAC(ctx context.Context, inPath, outPath string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if _, err := t.run(ctx, t.opts.FFmpegPath, "-y", "-loglevel", "error", "-i", inPath, "-vn",
+		"-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ac", "1", "-ar", "24000",
+		"-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", "-f", "mp4", outPath); err != nil {
+		return fmt.Errorf("konversi AAC: %w", err)
+	}
+	if st, err := os.Stat(outPath); err != nil || st.Size() < 512 {
+		return fmt.Errorf("konversi AAC: hasil kosong")
+	}
+	return nil
 }
 
 // Info adalah metadata yang dilaporkan yt-dlp sebelum mengunduh.

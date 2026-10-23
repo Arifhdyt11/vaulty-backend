@@ -67,3 +67,28 @@ func TestAudioDanFrameDariVideoSintetis(t *testing.T) {
 		t.Fatalf("frame %d %v", len(frames), err)
 	}
 }
+
+// ToAAC diuji dengan nada sintetis 3 detik (wav); dilewati bila ffmpeg/ffprobe tidak ada.
+func TestToAACMenghasilkanM4A(t *testing.T) {
+	tool := New(Options{})
+	if !tool.CanTranscode() {
+		t.Skip("ffmpeg/ffprobe tidak terpasang")
+	}
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.wav")
+	if out, err := exec.Command("ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", in).CombinedOutput(); err != nil {
+		t.Fatalf("buat wav: %v %s", err, out)
+	}
+	out := filepath.Join(dir, "out.m4a")
+	if err := tool.ToAAC(context.Background(), in, out); err != nil {
+		t.Fatal(err)
+	}
+	d, err := tool.Duration(context.Background(), out)
+	if err != nil || d < 2.5 || d > 3.5 {
+		t.Fatalf("durasi %v err %v", d, err)
+	}
+	codec, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,channels", "-of", "default=nw=1:nk=1", out).Output()
+	if err != nil || string(codec) != "aac\n1\n" {
+		t.Fatalf("codec %q err %v", codec, err)
+	}
+}

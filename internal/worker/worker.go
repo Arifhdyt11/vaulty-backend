@@ -17,6 +17,7 @@ import (
 type Deps struct {
 	Ingest    *service.IngestService
 	Account   *service.AccountService
+	Briefing  *service.BriefingService
 	Reminders *service.ReminderService
 	Auth      *service.AuthService
 	Billing   *service.BillingService
@@ -60,6 +61,7 @@ func NewServer(redisOpt asynq.RedisConnOpt, concurrency int, d Deps) *Server {
 	mux.HandleFunc(TaskItemIngest, s.handleIngest)
 	mux.HandleFunc(TaskAccountDelete, s.handleAccountDelete)
 	mux.HandleFunc(TaskExportBuild, s.handleExport)
+	mux.HandleFunc(TaskBriefingBuild, s.handleBriefing)
 	return s
 }
 
@@ -98,6 +100,20 @@ func (s *Server) handleExport(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("payload: %w: %w", err, asynq.SkipRetry)
 	}
 	return s.deps.Account.BuildExport(ctx, p.JobID, p.UserID)
+}
+
+func (s *Server) handleBriefing(ctx context.Context, t *asynq.Task) error {
+	var p BriefingPayload
+	if err := json.Unmarshal(t.Payload(), &p); err != nil {
+		return fmt.Errorf("payload: %w: %w", err, asynq.SkipRetry)
+	}
+	if s.deps.Briefing == nil {
+		return fmt.Errorf("siaran tidak dikonfigurasi: %w", asynq.SkipRetry)
+	}
+	if err := s.deps.Briefing.Build(ctx, p.UserID, p.BriefingID); err != nil {
+		return fmt.Errorf("siaran %d: %w", p.BriefingID, err)
+	}
+	return nil
 }
 
 // periodic: reminder tiap 20 detik; safety net tiap 5 menit; housekeeping tiap jam.
@@ -147,6 +163,13 @@ func (s *Server) housekeeping(ctx context.Context) {
 	if s.deps.Chats != nil {
 		if n, err := s.deps.Chats.PruneConversations(ctx, "free", service.RulesFor("free").ChatHistory); err == nil && n > 0 {
 			slog.InfoContext(ctx, "riwayat chat free dipangkas", "n", n)
+		}
+	}
+	if s.deps.Briefing != nil {
+		if n, err := s.deps.Briefing.Prune(ctx); err != nil {
+			slog.WarnContext(ctx, "pangkas siaran lama", "err", err)
+		} else if n > 0 {
+			slog.InfoContext(ctx, "audio siaran lama dihapus", "n", n)
 		}
 	}
 	if s.deps.Items != nil {

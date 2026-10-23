@@ -23,6 +23,7 @@ type Handlers struct {
 	Remind        *service.ReminderService
 	Ent           *service.EntitlementService
 	Billing       *service.BillingService
+	Briefing      *service.BriefingService
 	Repos         RepoAccess
 	WebhookSecret string
 }

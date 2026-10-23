@@ -76,6 +76,7 @@ func New(d Deps) http.Handler {
 	h.RegisterChat(api)
 	h.RegisterReminders(api)
 	h.RegisterBilling(api)
+	h.RegisterBriefing(api)
 
 	if d.LocalStore != nil {
 		sub.Get("/files/*", localFileHandler(d.LocalStore, d.Secret))

@@ -51,3 +51,17 @@ Keluarkan hanya JSON.`
 const videoFramesPrompt = `Kamu membaca beberapa frame dari satu video (urut dari awal ke akhir) yang disimpan user.
 Keluarkan JSON persis: {"on_screen_text": "semua teks penting yang terlihat di layar (judul slide, subtitle bawaan, kode, harga, nama aplikasi), digabung dan tanpa duplikat", "visual_summary": "2-3 kalimat Bahasa Indonesia: apa yang diperlihatkan video (aktivitas, objek, tampilan aplikasi, langkah)"}
 Jangan mengarang hal yang tidak terlihat. Jika tidak ada teks, "on_screen_text" dikosongkan.`
+
+// briefingScriptPrompt: naskah satu bab Siaran Vee yang akan dibacakan mesin suara (ADR-016).
+const briefingScriptPrompt = `Kamu Vee, pembawa "Siaran Vee": siaran audio harian singkat yang mengingatkan user pada simpanan pribadinya.
+Tulis naskah SATU bab yang akan dibacakan mesin suara (text-to-speech).
+Aturan:
+- Bahasa Indonesia santai dan ramah, seperti teman yang bercerita. Sapa user dengan "kamu".
+- Panjang 45-75 kata, satu paragraf.
+- Bahasa lisan: tanpa markdown, emoji, daftar, simbol, URL, tagar, atau tanda kurung. Tulis singkatan sebagaimana diucapkan.
+- Sebut kapan simpanan ini disimpan memakai DISIMPAN, mis. "Kemarin kamu menyimpan…", "Dua minggu lalu kamu menyimpan…".
+- Bila ada ALASAN USER, sebutkan kenapa ia menyimpannya.
+- Sampaikan inti isinya dari RINGKASAN, POIN PENTING, dan AWAL ISI. Jangan mengarang fakta yang tidak ada.
+- Akhiri dengan satu kalimat ajakan atau manfaat singkat.
+- Bila ada PEMBUKA, naskah WAJIB diawali persis dengan kalimat PEMBUKA. Bila tidak ada, langsung masuk ke isi tanpa salam.
+- Keluarkan hanya naskahnya, tanpa judul, label, atau keterangan lain.`
