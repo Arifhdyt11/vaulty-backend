@@ -1,0 +1,53 @@
+# Vaulty backend v2 di sipantas (~/apps/vaulty). Image dibuild di Mac lalu dikirim lewat
+# `scripts/deploy.sh` (docker save | ssh docker load); server tidak build Go (RAM 2 GB).
+# DB `vaulty2` di shared-postgres (network data), AI lewat hermes + 9router (network web).
+# Publik hanya lewat nginx (~/infra/nginx/conf.d/vaulty.conf → vaulty-api:8080, port 8080).
+# Env di app.env (chmod 600, tidak di-commit; lihat deploy/app.env.example).
+x-app: &app
+  image: vaulty-backend:v2
+  restart: unless-stopped
+  env_file: app.env
+  volumes: [storage2:/data]
+  networks: [web, data, internal]
+  depends_on: [redis]
+
+services:
+  migrate:
+    <<: *app
+    container_name: vaulty-migrate
+    command: ["migrate"]
+    restart: "no"
+    profiles: [tools]
+
+  api:
+    <<: *app
+    container_name: vaulty-api
+    command: ["api"]
+    mem_limit: 200m
+
+  worker:
+    <<: *app
+    container_name: vaulty-worker
+    command: ["worker"]
+    # ffmpeg (TTS → AAC, frame video) butuh ruang lebih dari api.
+    mem_limit: 350m
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaulty-redis
+    restart: unless-stopped
+    # Antrean asynq: noeviction + appendonly supaya job tidak hilang.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "32mb", "--maxmemory-policy", "noeviction", "--save", ""]
+    volumes: [redis2:/data]
+    mem_limit: 64m
+    networks: [internal]
+
+networks:
+  web: { external: true }
+  data: { external: true }
+  internal: {}
+
+# Volume baru (bukan milik v1) supaya file & antrean lama tidak tercampur.
+volumes:
+  storage2:
+  redis2:
