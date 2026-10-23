@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,13 @@ func localFileHandler(store *storage.Local, secret string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 		if strings.HasSuffix(key, ".zip") {
 			w.Header().Set("Content-Disposition", "attachment; filename=vaulty-export.zip")
+		}
+		// iOS AVPlayer (just_audio) wajib Range/206 untuk audio; tanpa itu
+		// audio Siaran gagal diputar walau file terkirim 200. ServeContent
+		// menangani Range, If-Range, dan HEAD.
+		if rs, ok := rc.(io.ReadSeeker); ok {
+			http.ServeContent(w, req, path.Base(key), time.Time{}, rs)
+			return
 		}
 		_, _ = io.Copy(w, rc)
 	}
