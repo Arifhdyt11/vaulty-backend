@@ -32,12 +32,15 @@ type Result struct {
 	SiteName     string
 	Author       string
 	ThumbnailURL string
-	Text         string // isi artikel (readability) atau caption post; sudah di-Clean
-	Transcript   string // transkrip video bila berhasil (YouTube caption), "" bila tidak
-	Language     string // kode bahasa bila diketahui ("id","en")
-	Duration     int    // detik, 0 bila tidak diketahui
-	PublishedAt  *time.Time
-	Warnings     []string // hal yang gagal tapi tidak fatal, mis. "oembed tiktok gagal: 403"
+	// PreviewVideoURL: video post tanpa gambar (Threads); worker mengambil satu frame-nya
+	// sebagai thumbnail.
+	PreviewVideoURL string
+	Text            string // isi artikel (readability) atau caption post; sudah di-Clean
+	Transcript      string // transkrip video bila berhasil (YouTube caption), "" bila tidak
+	Language        string // kode bahasa bila diketahui ("id","en")
+	Duration        int    // detik, 0 bila tidak diketahui
+	PublishedAt     *time.Time
+	Warnings        []string // hal yang gagal tapi tidak fatal, mis. "oembed tiktok gagal: 403"
 }
 
 // Options mengatur perilaku Fetcher. Nilai nol memakai default yang wajar.

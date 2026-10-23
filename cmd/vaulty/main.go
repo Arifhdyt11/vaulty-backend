@@ -22,7 +22,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "pemakaian: vaulty <api|worker|migrate [status]|requeue|import-v1 --email EMAIL [--dry-run]>")
+		fmt.Fprintln(os.Stderr, "pemakaian: vaulty <api|worker|migrate [status]|requeue|import-v1 --email EMAIL [--dry-run]|refresh-thumbs [--dry-run]>")
 		os.Exit(2)
 	}
 	cfg, err := config.Load()
@@ -45,6 +45,8 @@ func main() {
 		err = runAPI(ctx, cfg)
 	case "requeue":
 		err = runRequeue(ctx, cfg)
+	case "refresh-thumbs":
+		err = runRefreshThumbs(ctx, cfg, os.Args[2:])
 	case "import-v1":
 		err = runImportV1(ctx, cfg, os.Args[2:])
 	case "worker":

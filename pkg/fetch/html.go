@@ -302,6 +302,9 @@ func (f *Fetcher) fetchSocialOG(ctx context.Context, res *Result, sourceURL stri
 	if res.Description == "" && res.Title == "" {
 		f.tryOGUA(ctx, res, res.CanonicalURL, linkPreviewUserAgent)
 	}
+	if res.Platform == "threads" {
+		f.applyThreadsMedia(ctx, res, sourceURL)
+	}
 	res.Description = socialCaption(res.Description)
 	if res.Description == "" {
 		if isGenericSocialTitle(res.Title, res.SiteName) {
@@ -316,6 +319,24 @@ func (f *Fetcher) fetchSocialOG(ctx context.Context, res *Result, sourceURL stri
 	res.Title = ""
 	setIfEmpty(&res.Text, res.Description)
 	return nil
+}
+
+// applyThreadsMedia mengganti og:image Threads (kartu teks caption) dengan media asli post:
+// gambar pertama, atau video untuk diambil frame-nya. Post yang hanya tulisan tidak diberi
+// thumbnail supaya brankas tidak penuh tangkapan tulisan.
+func (f *Fetcher) applyThreadsMedia(ctx context.Context, res *Result, sourceURL string) {
+	res.ThumbnailURL = ""
+	m, err := f.ThreadsMedia(ctx, sourceURL)
+	if err != nil {
+		res.warn("media threads gagal: %v", err)
+		return
+	}
+	switch {
+	case len(m.Images) > 0:
+		res.ThumbnailURL = m.Images[0]
+	case len(m.Videos) > 0:
+		res.PreviewVideoURL = m.Videos[0]
+	}
 }
 
 // socialAuthor mengambil bagian sebelum " on <Platform>" / " di <Platform>".

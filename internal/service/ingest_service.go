@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -215,6 +217,12 @@ func (s *IngestService) stageFetch(ctx context.Context, u model.User, it *model.
 		} else {
 			slog.WarnContext(ctx, "salin thumbnail gagal", "item_id", it.ID, "err", err)
 		}
+	} else if res.PreviewVideoURL != "" {
+		if key, err := s.videoThumbnail(ctx, u.ID, it.ID, res.PreviewVideoURL); err == nil {
+			p.ThumbnailKey = &key
+		} else {
+			slog.WarnContext(ctx, "frame thumbnail gagal", "item_id", it.ID, "err", err)
+		}
 	}
 	if err := s.repos.Items.ApplyFetch(ctx, u.ID, it.ID, it.ContentVersion, p); err != nil {
 		return model.Stage{Status: "failed", Error: "simpan hasil fetch: " + ai.Truncate(err.Error(), 200)}
@@ -261,6 +269,75 @@ func (s *IngestService) copyThumbnail(ctx context.Context, userID, itemID int64,
 		return "", err
 	}
 	return key, nil
+}
+
+// maxPreviewVideoBytes membatasi unduhan video yang hanya dipakai untuk satu frame thumbnail.
+const maxPreviewVideoBytes = 40 << 20
+
+// videoThumbnail menyimpan satu frame tengah video sebagai thumbnail (post Threads berisi
+// video tanpa gambar). Butuh ffmpeg di worker; tanpa ffmpeg item cukup tanpa thumbnail.
+func (s *IngestService) videoThumbnail(ctx context.Context, userID, itemID int64, src string) (string, error) {
+	if s.media == nil || !s.media.CanTranscode() {
+		return "", errors.New("ffmpeg tidak tersedia")
+	}
+	data, _, err := s.fetcher.Download(ctx, src, maxPreviewVideoBytes)
+	if err != nil {
+		return "", fmt.Errorf("unduh video: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "vaulty-vthumb-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	video := filepath.Join(dir, "video.mp4")
+	if err := os.WriteFile(video, data, 0o600); err != nil {
+		return "", err
+	}
+	dur, err := s.media.Duration(ctx, video)
+	if err != nil || dur <= 0 {
+		dur = 1
+	}
+	frames, err := s.media.ExtractFrames(ctx, video, dir, dur, 1)
+	if err != nil || len(frames) == 0 {
+		return "", fmt.Errorf("ambil frame: %v", err)
+	}
+	img, err := os.ReadFile(frames[0])
+	if err != nil {
+		return "", err
+	}
+	key := fmt.Sprintf("u/%d/thumb/%d-%s.jpg", userID, itemID, uuid.NewString()[:8])
+	if err := s.store.Put(ctx, key, bytes.NewReader(img), int64(len(img)), "image/jpeg"); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// ThreadsMediaFor mengembalikan media asli post Threads (untuk `refresh-thumbs --dry-run`).
+func (s *IngestService) ThreadsMediaFor(ctx context.Context, sourceURL string) (fetch.ThreadsMedia, error) {
+	return s.fetcher.ThreadsMedia(ctx, sourceURL)
+}
+
+// RefreshThreadsThumbnail menghitung ulang thumbnail item Threads dari media asli post
+// (dipakai `vaulty refresh-thumbs` untuk data lama yang thumbnail-nya kartu teks caption).
+// Mengembalikan nil bila post hanya tulisan.
+func (s *IngestService) RefreshThreadsThumbnail(ctx context.Context, userID, itemID int64, sourceURL string) (*string, error) {
+	m, err := s.fetcher.ThreadsMedia(ctx, sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	var key string
+	switch {
+	case len(m.Images) > 0:
+		key, err = s.copyThumbnail(ctx, userID, itemID, m.Images[0])
+	case len(m.Videos) > 0:
+		key, err = s.videoThumbnail(ctx, userID, itemID, m.Videos[0])
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &key, nil
 }
 
 func setIf(dst **string, v string) {
