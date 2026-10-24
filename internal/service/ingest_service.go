@@ -674,6 +674,23 @@ func (s *IngestService) stageIndex(ctx context.Context, u model.User, it *model.
 }
 
 // BuildChunks: chunk pertama = ringkasan+judul+catatan (untuk embedding item), lalu isi dipotong ~900 rune dengan overlap.
+// chunkCut memilih titik potong ke belakang dari end: batas baris lebih dulu,
+// baru akhir kalimat. Baris didahulukan supaya perintah di catatan (mis.
+// "scripts/deploy.sh") tidak terpotong di titik nama file.
+func chunkCut(r []rune, start, end, size int) int {
+	for k := end; k > start+size/2; k-- {
+		if r[k-1] == '\n' {
+			return k
+		}
+	}
+	for k := end; k > start+size/2; k-- {
+		if r[k-1] == '.' || r[k-1] == '!' || r[k-1] == '?' {
+			return k
+		}
+	}
+	return end
+}
+
 func BuildChunks(it model.Item) []repository.NewChunk {
 	var out []repository.NewChunk
 	head := strings.TrimSpace(strings.Join(filterEmpty([]string{deref(it.Title), it.UserNote, deref(it.Summary), strings.Join(it.KeyPoints, " • ")}), "\n"))
@@ -695,13 +712,7 @@ func BuildChunks(it model.Item) []repository.NewChunk {
 		if end > len(r) {
 			end = len(r)
 		} else {
-			// potong di batas kalimat/baris terdekat ke belakang
-			for k := end; k > start+size/2; k-- {
-				if r[k-1] == '\n' || r[k-1] == '.' || r[k-1] == '!' || r[k-1] == '?' {
-					end = k
-					break
-				}
-			}
+			end = chunkCut(r, start, end, size)
 		}
 		text := strings.TrimSpace(string(r[start:end]))
 		if utf8.RuneCountInString(text) > 20 {

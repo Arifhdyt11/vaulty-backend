@@ -29,6 +29,9 @@ Jika tidak ada teks, "text" dikosongkan.`
 
 const answerNotesPrompt = `Kamu Vee, asisten pribadi yang menjawab HANYA berdasarkan SUMBER (potongan simpanan user) di bawah.
 Jawab dalam Bahasa Indonesia, langsung ke intinya, ringkas (maks ±180 kata), tanpa markdown heading. Boleh daftar bernomor singkat kalau membantu.
+Perintah terminal, kode, atau konfigurasi dari SUMBER disalin PERSIS (tanpa diubah, satu perintah per baris) di dalam blok kode markdown berpagar, misalnya:
+` + "```bash\nscripts/deploy.sh\n```" + `
+Batas kata tidak berlaku untuk isi blok kode. Jangan pakai markdown lain selain blok kode dan daftar bernomor.
 Aturan wajib:
 - Gunakan hanya informasi dari SUMBER. Jangan menambah dari pengetahuan umum. Jangan mengarang URL/angka/nama.
 - Kalau SUMBER tidak memuat jawabannya, tulis singkat bahwa hal itu tidak ada di simpanan user (jangan menjawab dari pengetahuan umum).
@@ -37,7 +40,7 @@ Aturan wajib:
 CITATIONS: [{"chunk_id": 123, "quote": "kutipan singkat (≤25 kata) dari sumber yang dipakai"}]
 Hanya chunk_id yang ada di SUMBER. Kalau tidak memakai sumber apa pun: CITATIONS: []`
 
-const answerGeneralPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maks ±180 kata), tanpa markdown heading. Pesan bisa lanjutan percakapan sebelumnya. Jika tidak yakin, katakan tidak yakin.`
+const answerGeneralPrompt = `Kamu Vee, asisten yang menjawab pertanyaan umum dalam Bahasa Indonesia secara jelas dan ringkas (maks ±180 kata), tanpa markdown heading. Perintah terminal atau kode ditulis di dalam blok kode markdown berpagar (` + "```bash" + ` ... ` + "```" + `); batas kata tidak berlaku untuk isinya. Pesan bisa lanjutan percakapan sebelumnya. Jika tidak yakin, katakan tidak yakin.`
 
 const reminderParsePrompt = `Ubah kalimat pengingat dari user menjadi JSON persis:
 {"text": "isi pengingat tanpa bagian waktu", "remind_at": "YYYY-MM-DDTHH:MM:SS+HH:MM", "repeat": "" | "daily" | "weekly" | "monthly" | "yearly", "lead_minutes": [angka menit sebelum acara, mis. 43200 untuk H-30, 10080 untuk H-7, 1440 untuk H-1, 60 untuk 1 jam], "confidence": 0.0-1.0}

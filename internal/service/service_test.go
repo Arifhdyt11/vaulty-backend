@@ -203,3 +203,13 @@ func TestTranscribeVideoTanpaAlatDilewati(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestChunkCutMendahulukanBatasBaris(t *testing.T) {
+	// Titik di "deploy.sh" lebih dekat ke batas, tapi potongan harus di akhir baris.
+	r := []rune("baris satu cukup panjang di sini\ncd vaulty && scripts/deploy.sh --cepat")
+	end := len(r) - 3
+	got := chunkCut(r, 0, end, 60)
+	if string(r[got-1]) != "\n" {
+		t.Fatalf("potong di indeks %d (%q), mau setelah newline", got, string(r[:got]))
+	}
+}
