@@ -13,7 +13,7 @@ type User struct {
 	AvatarURL *string   `json:"avatar_url"`
 	Timezone  string    `json:"timezone"`
 	Plan      string    `json:"plan" enum:"free,pro"`
-	Role      string    `json:"-"`
+	Role      string    `json:"role" enum:"user,admin"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -265,4 +265,37 @@ type BriefingChapter struct {
 	DurationSec int     `json:"duration_sec" doc:"0 selama dibuat"`
 	Status      string  `json:"status" enum:"pending,ready,failed"`
 	Error       string  `json:"-"`
+}
+
+// ---- admin ----
+
+type AdminDayPoint struct {
+	Date  string `json:"date"`
+	Items int    `json:"items"`
+	Users int    `json:"users"`
+}
+
+type AdminUser struct {
+	ID        int64     `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	Plan      string    `json:"plan"`
+	Role      string    `json:"role"`
+	Items     int       `json:"items"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AdminOverview struct {
+	Users            int             `json:"users"`
+	ProUsers         int             `json:"pro_users"`
+	NewUsers30d      int             `json:"new_users_30d"`
+	Items            int             `json:"items"`
+	ItemsReady       int             `json:"items_ready"`
+	ItemsProcessing  int             `json:"items_processing"`
+	ItemsFailed      int             `json:"items_failed"`
+	Items30d         int             `json:"items_30d"`
+	RemindersPending int             `json:"reminders_pending"`
+	Conversations    int             `json:"conversations"`
+	Daily            []AdminDayPoint `json:"daily"`
+	RecentUsers      []AdminUser     `json:"recent_users"`
 }

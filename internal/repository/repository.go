@@ -32,6 +32,7 @@ type Repos struct {
 	Audit    *AuditRepo
 	Cache    *FetchCacheRepo
 	Briefing *BriefingRepo
+	Admin    *AdminRepo
 }
 
 func New(pool *pgxpool.Pool) *Repos {
@@ -48,6 +49,7 @@ func New(pool *pgxpool.Pool) *Repos {
 		Audit:    &AuditRepo{db: pool},
 		Cache:    &FetchCacheRepo{db: pool},
 		Briefing: &BriefingRepo{db: pool},
+		Admin:    &AdminRepo{db: pool},
 	}
 }
 

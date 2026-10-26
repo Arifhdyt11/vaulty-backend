@@ -73,7 +73,7 @@ func runAPI(ctx context.Context, cfg config.Config) error {
 	defer app.Close()
 
 	h := &v1.Handlers{Auth: app.Auth, Account: app.Account, Items: app.Items, Search: app.Search, Answer: app.Answer, Remind: app.Remind,
-		Ent: app.Ent, Billing: app.Billing, Briefing: app.Briefing, Repos: app.Repos.Access(), WebhookSecret: cfg.RevenueCatWebhookSecret}
+		Ent: app.Ent, Billing: app.Billing, Briefing: app.Briefing, Repos: app.Repos.Access(), Admin: app.Repos.Admin, WebhookSecret: cfg.RevenueCatWebhookSecret}
 	mux := router.New(router.Deps{
 		Handlers: h, Auth: app.Auth,
 		ReadyDB:    func(c context.Context) error { return app.Pool.Ping(c) },

@@ -25,6 +25,7 @@ type Handlers struct {
 	Billing       *service.BillingService
 	Briefing      *service.BriefingService
 	Repos         RepoAccess
+	Admin         AdminStats
 	WebhookSecret string
 }
 
