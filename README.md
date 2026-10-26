@@ -1,6 +1,6 @@
 # Vaulty API
 
-Backend Vaulty: simpan apa pun yang kamu temukan (link video/artikel, gambar, tulisan, suara, file) → Vee (AI) mengambil isi & meringkas → tanya dengan jawaban berkutipan → diingatkan tepat waktu. Go 1.26, chi + huma v2 (OpenAPI), PostgreSQL + pgvector, Redis + asynq, S3-compatible storage, API kompatibel OpenAI, FCM, RevenueCat.
+Backend Vaulty (smart bookmark): simpan apa pun yang kamu temukan (link video/artikel, gambar, tulisan, suara, file) → Vee (AI) mengambil isi & meringkas → tanya dengan jawaban berkutipan → diingatkan tepat waktu. Go 1.26, chi + huma v2 (OpenAPI), PostgreSQL + pgvector, Redis + asynq, S3-compatible storage, API kompatibel OpenAI, FCM, RevenueCat.
 
 Dokumentasi produk & arsitektur ada di vault Obsidian `../vaulty-vault/` (mulai dari `Home.md`). Kontrak API: `../vaulty-vault/02 Architecture/API Kontrak v1.md`; bentuk finalnya `openapi.json` di repo ini (`make openapi`).
 

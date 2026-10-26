@@ -59,7 +59,7 @@ func New(d Deps) http.Handler {
 	})
 
 	cfg := huma.DefaultConfig("Vaulty API", "1.0.0")
-	cfg.Info.Description = "API Vaulty: simpan apa pun, tanya Vee, diingatkan."
+	cfg.Info.Description = "API Vaulty, aplikasi smart bookmark: simpan apa pun, Vee membaca isinya, tanya, diingatkan, dibacakan tiap pagi (Cerita Vee)."
 	cfg.Servers = []*huma.Server{{URL: "/api/v1"}}
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{"bearer": {Type: "http", Scheme: "bearer"}}
 	cfg.DocsPath = "" // Swagger UI sendiri di /api/docs
