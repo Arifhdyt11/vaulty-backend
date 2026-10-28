@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -41,10 +42,9 @@ var (
 
 const (
 	scopeMessaging = "https://www.googleapis.com/auth/firebase.messaging"
-	// Channel dan category harus cocok dengan yang didaftarkan di app Flutter.
-	androidChannel = "reminders"
-	clickAction    = "FLUTTER_NOTIFICATION_CLICK"
-	apnsCategory   = "REMINDER"
+	// Category harus sama dengan DarwinNotificationCategory di app Flutter
+	// (lib/push/push_service.dart).
+	apnsCategory = "VAULTY_REMINDER"
 )
 
 // FCM mengirim lewat endpoint HTTP v1. Endpoint dan client adalah field
@@ -114,27 +114,14 @@ func (f *FCM) ProjectID() string { return f.projectID }
 
 // Struktur payload FCM v1 (hanya field yang dipakai).
 type message struct {
-	Token        string            `json:"token"`
-	Notification *notification     `json:"notification,omitempty"`
-	Data         map[string]string `json:"data,omitempty"`
-	Android      *androidConfig    `json:"android,omitempty"`
-	APNS         *apnsConfig       `json:"apns,omitempty"`
-}
-
-type notification struct {
-	Title string `json:"title,omitempty"`
-	Body  string `json:"body,omitempty"`
-	Image string `json:"image,omitempty"`
+	Token   string            `json:"token"`
+	Data    map[string]string `json:"data,omitempty"`
+	Android *androidConfig    `json:"android,omitempty"`
+	APNS    *apnsConfig       `json:"apns,omitempty"`
 }
 
 type androidConfig struct {
-	Priority     string               `json:"priority"`
-	Notification *androidNotification `json:"notification,omitempty"`
-}
-
-type androidNotification struct {
-	ChannelID   string `json:"channel_id"`
-	ClickAction string `json:"click_action"`
+	Priority string `json:"priority"`
 }
 
 type apnsConfig struct {
@@ -148,9 +135,15 @@ type apnsPayload struct {
 }
 
 type aps struct {
-	Sound          string `json:"sound"`
-	Category       string `json:"category"`
-	MutableContent int    `json:"mutable-content"`
+	Alert          apsAlert `json:"alert"`
+	Sound          string   `json:"sound"`
+	Category       string   `json:"category"`
+	MutableContent int      `json:"mutable-content"`
+}
+
+type apsAlert struct {
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body,omitempty"`
 }
 
 type apnsFCMOptions struct {
@@ -164,19 +157,27 @@ func (f *FCM) Send(ctx context.Context, token string, n Notification, data map[s
 	if strings.TrimSpace(token) == "" {
 		return ErrInvalidToken
 	}
+	// Data message tanpa blok notification (ADR-010): di Android app yang
+	// membangun notifikasi lokal dengan aksi Selesai/Tunda, jadi judul & isi
+	// ikut di data. Blok notification akan membuat OS menampilkan notifikasi
+	// sendiri tanpa aksi dan handler app tidak dipanggil saat background.
+	d := make(map[string]string, len(data)+3)
+	maps.Copy(d, data)
+	d["title"] = n.Title
+	d["body"] = n.Body
+	if n.ImageURL != "" {
+		d["thumbnail_url"] = n.ImageURL
+	}
 	msg := message{
-		Token:        token,
-		Notification: &notification{Title: n.Title, Body: n.Body, Image: n.ImageURL},
-		Data:         data,
-		Android: &androidConfig{
-			// "high" supaya reminder tetap tiba saat Doze; channel & click_action
-			// harus sama dengan yang dibuat app.
-			Priority:     "high",
-			Notification: &androidNotification{ChannelID: androidChannel, ClickAction: clickAction},
-		},
+		Token: token,
+		Data:  d,
+		// "high" supaya data message tetap membangunkan app saat Doze.
+		Android: &androidConfig{Priority: "high"},
+		// iOS tidak mengantar data message ke app yang sudah ditutup, jadi
+		// APNs tetap membawa alert; category memberi tombol aksi.
 		APNS: &apnsConfig{
 			Headers: map[string]string{"apns-priority": "10"},
-			Payload: apnsPayload{APS: aps{Sound: "default", Category: apnsCategory, MutableContent: 1}},
+			Payload: apnsPayload{APS: aps{Alert: apsAlert{Title: n.Title, Body: n.Body}, Sound: "default", Category: apnsCategory, MutableContent: 1}},
 		},
 	}
 	if n.ImageURL != "" {
@@ -251,7 +252,7 @@ func classifyError(status int, raw []byte) error {
 	return fmt.Errorf("fcm: status %d %s: %s", status, fe.Error.Status, msg)
 }
 
-// Disabled dipakai saat FIREBASE_SERVICE_ACCOUNT tidak diset (dev/CI).
+// Disabled dipakai saat FCM_CREDENTIALS_FILE tidak diset (dev/CI).
 type Disabled struct{}
 
 func (Disabled) Send(context.Context, string, Notification, map[string]string) error {

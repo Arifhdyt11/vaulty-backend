@@ -7,7 +7,9 @@ x-app: &app
   image: vaulty-backend:v2
   restart: unless-stopped
   env_file: app.env
-  volumes: [storage2:/data]
+  # secrets/ (chmod 700, tidak di-commit) berisi service account FCM. Mount folder,
+  # bukan file: bila file belum ada, Docker tidak membuat direktori palsu di path-nya.
+  volumes: [storage2:/data, ./secrets:/run/vaulty-secrets:ro]
   networks: [web, data, internal]
   depends_on: [redis]
 

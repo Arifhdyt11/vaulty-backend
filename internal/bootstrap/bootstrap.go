@@ -120,6 +120,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 		a.Push = f
+		slog.Info("push FCM aktif", "project_id", f.ProjectID())
+	} else {
+		slog.Warn("push nonaktif: FCM_CREDENTIALS_FILE kosong; reminder ditandai terkirim tanpa notifikasi")
 	}
 
 	gv, err := googleauth.New(ctx, cfg.GoogleClientIDs)

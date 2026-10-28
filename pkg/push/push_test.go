@@ -43,28 +43,29 @@ func TestSendPayload(t *testing.T) {
 	if msg["token"] != "tok123" {
 		t.Errorf("token = %v", msg["token"])
 	}
-	n := msg["notification"].(map[string]any)
-	if n["title"] != "Ingat" || n["body"] != "Baca artikel" || n["image"] != "https://img/x.jpg" {
-		t.Errorf("notification = %v", n)
+	// Data message (ADR-010): tanpa blok notification, judul & isi di data.
+	if _, ok := msg["notification"]; ok {
+		t.Errorf("tidak boleh ada blok notification: %v", msg["notification"])
 	}
-	if msg["data"].(map[string]any)["item_id"] != "42" {
-		t.Errorf("data = %v", msg["data"])
+	data := msg["data"].(map[string]any)
+	if data["item_id"] != "42" || data["title"] != "Ingat" || data["body"] != "Baca artikel" || data["thumbnail_url"] != "https://img/x.jpg" {
+		t.Errorf("data = %v", data)
 	}
 	android := msg["android"].(map[string]any)
-	if android["priority"] != "high" {
+	if android["priority"] != "high" || android["notification"] != nil {
 		t.Errorf("android = %v", android)
-	}
-	an := android["notification"].(map[string]any)
-	if an["channel_id"] != "reminders" || an["click_action"] != "FLUTTER_NOTIFICATION_CLICK" {
-		t.Errorf("android.notification = %v", an)
 	}
 	apns := msg["apns"].(map[string]any)
 	if apns["headers"].(map[string]any)["apns-priority"] != "10" {
 		t.Errorf("apns headers = %v", apns["headers"])
 	}
 	aps := apns["payload"].(map[string]any)["aps"].(map[string]any)
-	if aps["sound"] != "default" || aps["category"] != "REMINDER" || aps["mutable-content"] != float64(1) {
+	if aps["sound"] != "default" || aps["category"] != "VAULTY_REMINDER" || aps["mutable-content"] != float64(1) {
 		t.Errorf("aps = %v", aps)
+	}
+	alert := aps["alert"].(map[string]any)
+	if alert["title"] != "Ingat" || alert["body"] != "Baca artikel" {
+		t.Errorf("aps.alert = %v", alert)
 	}
 }
 

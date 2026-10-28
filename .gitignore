@@ -12,3 +12,7 @@ service-account*.json
 coverage.out
 .claude/settings.local.json
 dev-accounts.local.txt
+
+# Service account FCM (lokal & deploy)
+secrets/
+*service-account*.json
