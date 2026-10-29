@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"vaulty/internal/model"
 )
@@ -26,18 +27,46 @@ func (r *BillingRepo) PlanLimits(ctx context.Context) ([]model.PlanLimit, error)
 	return out, rows.Err()
 }
 
-func (r *BillingRepo) Usage(ctx context.Context, userID int64, metric, period string) (int, error) {
-	var used int
-	err := r.db.QueryRow(ctx, `SELECT coalesce((SELECT used FROM usage_counters WHERE user_id = $1 AND metric = $2 AND period = $3), 0)`, userID, metric, period).Scan(&used)
-	return used, err
+// Usage mengembalikan pemakaian dan kuota tambahan (bonus) untuk satu periode.
+func (r *BillingRepo) Usage(ctx context.Context, userID int64, metric, period string) (used, bonus int, err error) {
+	err = r.db.QueryRow(ctx, `SELECT coalesce(max(used), 0), coalesce(max(bonus), 0) FROM usage_counters WHERE user_id = $1 AND metric = $2 AND period = $3`,
+		userID, metric, period).Scan(&used, &bonus)
+	return used, bonus, err
 }
 
-// Consume menambah pemakaian dan mengembalikan nilai baru (atomik).
-func (r *BillingRepo) Consume(ctx context.Context, userID int64, metric, period string, n int) (int, error) {
-	var used int
-	err := r.db.QueryRow(ctx, `INSERT INTO usage_counters (user_id, metric, period, used) VALUES ($1,$2,$3,$4)
-		ON CONFLICT (user_id, metric, period) DO UPDATE SET used = usage_counters.used + EXCLUDED.used RETURNING used`, userID, metric, period, n).Scan(&used)
-	return used, err
+// Consume menambah pemakaian dan mengembalikan nilai baru beserta bonus (atomik).
+func (r *BillingRepo) Consume(ctx context.Context, userID int64, metric, period string, n int) (used, bonus int, err error) {
+	err = r.db.QueryRow(ctx, `INSERT INTO usage_counters (user_id, metric, period, used) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (user_id, metric, period) DO UPDATE SET used = usage_counters.used + EXCLUDED.used RETURNING used, bonus`, userID, metric, period, n).Scan(&used, &bonus)
+	return used, bonus, err
+}
+
+// ResetUsage mengosongkan pemakaian satu periode; bonus tetap.
+func (r *BillingRepo) ResetUsage(ctx context.Context, userID int64, metric, period string) error {
+	_, err := r.db.Exec(ctx, `UPDATE usage_counters SET used = 0 WHERE user_id = $1 AND metric = $2 AND period = $3`, userID, metric, period)
+	return err
+}
+
+// AddBonus menambah kuota tambahan satu periode.
+func (r *BillingRepo) AddBonus(ctx context.Context, userID int64, metric, period string, n int) error {
+	_, err := r.db.Exec(ctx, `INSERT INTO usage_counters (user_id, metric, period, bonus) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (user_id, metric, period) DO UPDATE SET bonus = usage_counters.bonus + EXCLUDED.bonus`, userID, metric, period, n)
+	return err
+}
+
+// RevokeManualPro mengakhiri langganan Pro manual (dari admin/kupon); langganan toko tidak disentuh.
+func (r *BillingRepo) RevokeManualPro(ctx context.Context, userID int64) (int64, error) {
+	t, err := r.db.Exec(ctx, `UPDATE subscriptions SET status = 'cancelled', period_end = now(), updated_at = now()
+		WHERE user_id = $1 AND provider = 'manual' AND status IN ('active','grace')`, userID)
+	return t.RowsAffected(), err
+}
+
+// ManualProEnd: akhir langganan Pro manual yang masih aktif (untuk memperpanjang).
+func (r *BillingRepo) ManualProEnd(ctx context.Context, userID int64) (*time.Time, error) {
+	var t *time.Time
+	err := r.db.QueryRow(ctx, `SELECT max(period_end) FROM subscriptions WHERE user_id = $1 AND provider = 'manual'
+		AND status = 'active' AND period_end > now()`, userID).Scan(&t)
+	return t, err
 }
 
 func (r *BillingRepo) UpsertSubscription(ctx context.Context, s model.Subscription) error {

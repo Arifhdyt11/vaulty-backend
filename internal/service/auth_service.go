@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"vaulty/internal/model"
 	"vaulty/internal/repository"
 	"vaulty/pkg/googleauth"
+	mailer "vaulty/pkg/mail"
 	"vaulty/pkg/password"
 )
 
@@ -25,6 +27,8 @@ type AuthConfig struct {
 	AccessTTL, RefreshTTL time.Duration
 	RegistrationOpen      bool
 	AllowedEmails         []string
+	Secret                string        // HMAC kode OTP (APP_SECRET)
+	Mail                  mailer.Sender // nil/Disabled = fitur email mati (ADR-022)
 }
 
 type AuthService struct {
@@ -78,6 +82,12 @@ func (s *AuthService) Register(ctx context.Context, email, pass, name string, me
 	}
 	sess, err := s.issue(ctx, u, meta)
 	s.audit(ctx, u.ID, "auth.register", meta)
+	// Kode verifikasi dikirim langsung; gagal kirim tidak menggagalkan daftar (user bisa minta ulang).
+	if err == nil && s.EmailEnabled() {
+		if serr := s.sendCode(ctx, u, purposeVerify, true); serr != nil {
+			slog.WarnContext(ctx, "kirim kode verifikasi saat daftar gagal", "user_id", u.ID, "err", serr)
+		}
+	}
 	return u, sess, err
 }
 
@@ -187,11 +197,19 @@ func (s *AuthService) UserByToken(ctx context.Context, token string) (model.User
 	return u, nil
 }
 
+// CleanupExpired membersihkan sesi kedaluwarsa dan kode OTP lama (ADR-022).
 func (s *AuthService) CleanupExpired(ctx context.Context) (int64, error) {
+	if _, err := s.repos.Codes.Cleanup(ctx); err != nil {
+		slog.WarnContext(ctx, "bersihkan kode email", "err", err)
+	}
 	return s.repos.Sessions.CleanupExpired(ctx)
 }
 
 func (s *AuthService) issue(ctx context.Context, u model.User, meta ClientMeta) (model.Session, error) {
+	// Semua jalur login (email, Google, register) lewat sini, jadi cukup dicek sekali.
+	if off, err := s.repos.Users.Suspended(ctx, u.ID); err == nil && off {
+		return model.Session{}, model.ErrSuspended
+	}
 	access, refresh := newToken(), newToken()
 	now := time.Now()
 	n := repository.NewSession{UserID: u.ID, AccessHash: hashToken(access), RefreshHash: hashToken(refresh),

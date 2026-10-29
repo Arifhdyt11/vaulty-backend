@@ -12,11 +12,11 @@ import (
 
 type UserRepo struct{ db DB }
 
-const userCols = `id, email, name, avatar_url, timezone, plan, role, created_at`
+const userCols = `id, email, name, avatar_url, timezone, plan, role, created_at, email_verified_at IS NOT NULL, password_hash IS NOT NULL`
 
 func scanUser(row interface{ Scan(...any) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.Timezone, &u.Plan, &u.Role, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.Timezone, &u.Plan, &u.Role, &u.CreatedAt, &u.EmailVerified, &u.HasPassword)
 	return u, mapErr(err)
 }
 
@@ -28,8 +28,9 @@ type NewUser struct {
 }
 
 func (r *UserRepo) Create(ctx context.Context, n NewUser) (model.User, error) {
-	row := r.db.QueryRow(ctx, `INSERT INTO users (email, name, password_hash, google_sub, avatar_url)
-		VALUES ($1, $2, $3, $4, $5) RETURNING `+userCols, n.Email, n.Name, n.PasswordHash, n.GoogleSub, n.AvatarURL)
+	// Akun Google langsung terverifikasi; akun email menunggu OTP (ADR-022).
+	row := r.db.QueryRow(ctx, `INSERT INTO users (email, name, password_hash, google_sub, avatar_url, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, CASE WHEN $4::text IS NOT NULL THEN now() END) RETURNING `+userCols, n.Email, n.Name, n.PasswordHash, n.GoogleSub, n.AvatarURL)
 	u, err := scanUser(row)
 	if isUnique(err) {
 		return u, model.ErrEmailTaken
@@ -41,7 +42,7 @@ func (r *UserRepo) ByEmail(ctx context.Context, email string) (model.User, strin
 	var u model.User
 	var hash *string
 	err := r.db.QueryRow(ctx, `SELECT `+userCols+`, password_hash FROM users WHERE email = $1 AND deleted_at IS NULL`, email).
-		Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.Timezone, &u.Plan, &u.Role, &u.CreatedAt, &hash)
+		Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.Timezone, &u.Plan, &u.Role, &u.CreatedAt, &u.EmailVerified, &u.HasPassword, &hash)
 	if err != nil {
 		return u, "", mapErr(err)
 	}
@@ -61,13 +62,48 @@ func (r *UserRepo) ByGoogleSub(ctx context.Context, sub string) (model.User, err
 }
 
 func (r *UserRepo) LinkGoogle(ctx context.Context, id int64, sub string, avatar *string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET google_sub = $2, avatar_url = COALESCE(avatar_url, $3), updated_at = now() WHERE id = $1`, id, sub, avatar)
+	_, err := r.db.Exec(ctx, `UPDATE users SET google_sub = $2, avatar_url = COALESCE(avatar_url, $3),
+		email_verified_at = COALESCE(email_verified_at, now()), updated_at = now() WHERE id = $1`, id, sub, avatar)
+	return err
+}
+
+// SetVerified menandai email terverifikasi (OTP benar, reset password, atau admin).
+func (r *UserRepo) SetVerified(ctx context.Context, id int64, on bool) error {
+	t, err := r.db.Exec(ctx, `UPDATE users SET email_verified_at = CASE WHEN $2 THEN COALESCE(email_verified_at, now()) END,
+		updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, on)
+	if err == nil && t.RowsAffected() == 0 {
+		return model.ErrNotFound
+	}
+	return err
+}
+
+func (r *UserRepo) PasswordHash(ctx context.Context, id int64) (string, error) {
+	var h *string
+	err := r.db.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&h)
+	if err != nil || h == nil {
+		return "", mapErr(err)
+	}
+	return *h, nil
+}
+
+func (r *UserRepo) SetPassword(ctx context.Context, id int64, hash string) error {
+	t, err := r.db.Exec(ctx, `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, hash)
+	if err == nil && t.RowsAffected() == 0 {
+		return model.ErrNotFound
+	}
 	return err
 }
 
 func (r *UserRepo) Update(ctx context.Context, id int64, name, timezone *string) (model.User, error) {
 	return scanUser(r.db.QueryRow(ctx, `UPDATE users SET name = COALESCE($2, name), timezone = COALESCE($3, timezone), updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL RETURNING `+userCols, id, name, timezone))
+}
+
+// Suspended: akun dinonaktifkan admin (ADR-021).
+func (r *UserRepo) Suspended(ctx context.Context, id int64) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx, `SELECT suspended_at IS NOT NULL FROM users WHERE id = $1`, id).Scan(&ok)
+	return ok, mapErr(err)
 }
 
 func (r *UserRepo) SetPlan(ctx context.Context, id int64, plan string) error {
@@ -120,9 +156,9 @@ func (r *SessionRepo) Create(ctx context.Context, n NewSession) (int64, error) {
 
 // UserByAccess mengembalikan user dari access token yang masih berlaku.
 func (r *SessionRepo) UserByAccess(ctx context.Context, accessHash string) (model.User, error) {
-	return scanUser(r.db.QueryRow(ctx, `SELECT u.id, u.email, u.name, u.avatar_url, u.timezone, u.plan, u.role, u.created_at
+	return scanUser(r.db.QueryRow(ctx, `SELECT u.id, u.email, u.name, u.avatar_url, u.timezone, u.plan, u.role, u.created_at, u.email_verified_at IS NOT NULL, u.password_hash IS NOT NULL
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.access_token_hash = $1 AND s.access_expires_at > now() AND u.deleted_at IS NULL`, accessHash))
+		WHERE s.access_token_hash = $1 AND s.access_expires_at > now() AND u.deleted_at IS NULL AND u.suspended_at IS NULL`, accessHash))
 }
 
 // Rotate mengganti access+refresh token untuk sesi dengan refresh hash lama yang masih berlaku.
@@ -142,6 +178,12 @@ func (r *SessionRepo) DeleteByRefresh(ctx context.Context, userID int64, refresh
 
 func (r *SessionRepo) DeleteByAccess(ctx context.Context, accessHash string) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM sessions WHERE access_token_hash = $1`, accessHash)
+	return err
+}
+
+// DeleteOthers menghapus semua sesi user kecuali sesi dengan access hash ini (ganti password).
+func (r *SessionRepo) DeleteOthers(ctx context.Context, userID int64, keepAccessHash string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND access_token_hash <> $2`, userID, keepAccessHash)
 	return err
 }
 

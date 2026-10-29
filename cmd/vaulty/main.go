@@ -73,7 +73,8 @@ func runAPI(ctx context.Context, cfg config.Config) error {
 	defer app.Close()
 
 	h := &v1.Handlers{Auth: app.Auth, Account: app.Account, Items: app.Items, Search: app.Search, Answer: app.Answer, Remind: app.Remind,
-		Ent: app.Ent, Billing: app.Billing, Briefing: app.Briefing, Repos: app.Repos.Access(), Admin: app.Repos.Admin, WebhookSecret: cfg.RevenueCatWebhookSecret}
+		Ent: app.Ent, Billing: app.Billing, Briefing: app.Briefing, Repos: app.Repos.Access(), Admin: app.Admin, Settings: app.Settings, WebhookSecret: cfg.RevenueCatWebhookSecret}
+	go app.Settings.Run(ctx)
 	mux := router.New(router.Deps{
 		Handlers: h, Auth: app.Auth,
 		ReadyDB:    func(c context.Context) error { return app.Pool.Ping(c) },
@@ -104,6 +105,7 @@ func runWorker(ctx context.Context, cfg config.Config) error {
 		Ingest: app.Ingest, Account: app.Account, Briefing: app.Briefing, Reminders: app.Remind, Auth: app.Auth, Billing: app.Billing,
 		Chats: app.Repos.Chats, Items: app.Repos.Items, Push: app.Push, Queue: app.Queue, Store: app.Store,
 	})
+	go app.Settings.Run(ctx)
 	slog.Info("worker started", "concurrency", cfg.WorkerConcurrency, "ai", app.AIOn)
 	return srv.Run(ctx)
 }

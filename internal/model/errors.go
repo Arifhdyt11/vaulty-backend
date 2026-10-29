@@ -19,6 +19,9 @@ var (
 	ErrUnsupportedFile = errors.New("tipe file tidak didukung")
 	ErrAIDisabled      = errors.New("fitur AI belum dikonfigurasi")
 	ErrConflict        = errors.New("konflik")
+	ErrSuspended       = errors.New("akun ini dinonaktifkan admin")
+	ErrTooMany         = errors.New("terlalu sering, coba lagi sebentar lagi")
+	ErrMailOff         = errors.New("pengiriman email belum dikonfigurasi di server")
 )
 
 // QuotaError → 402 dengan detail kuota supaya app bisa menampilkan paywall.
@@ -27,6 +30,7 @@ type QuotaError struct {
 	Limit    int
 	Used     int
 	ResetsAt time.Time
+	Upgrade  bool // false bila Pro ditutup admin atau user sudah Pro (ADR-021)
 }
 
 func (e *QuotaError) Error() string {

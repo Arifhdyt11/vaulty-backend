@@ -107,7 +107,12 @@ func parseAppUserID(ids ...string) int64 {
 
 // SyncPlan menghitung ulang users.plan dari subscriptions.
 func (s *BillingService) SyncPlan(ctx context.Context, userID int64) error {
-	pro, err := s.repos.Billing.HasActivePro(ctx, userID)
+	return syncPlan(ctx, s.repos, userID)
+}
+
+// syncPlan terpisah supaya bisa dipakai dengan Repos transaksi (kupon, admin).
+func syncPlan(ctx context.Context, repos *repository.Repos, userID int64) error {
+	pro, err := repos.Billing.HasActivePro(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -115,7 +120,24 @@ func (s *BillingService) SyncPlan(ctx context.Context, userID int64) error {
 	if pro {
 		plan = "pro"
 	}
-	return s.repos.Users.SetPlan(ctx, userID, plan)
+	return repos.Users.SetPlan(ctx, userID, plan)
+}
+
+// grantManualPro menambah langganan Pro manual selama days hari, memperpanjang
+// sisa Pro manual yang masih berjalan.
+func grantManualPro(ctx context.Context, repos *repository.Repos, userID int64, days int, ref string) (time.Time, error) {
+	start := time.Now()
+	if end, err := repos.Billing.ManualProEnd(ctx, userID); err != nil {
+		return time.Time{}, err
+	} else if end != nil && end.After(start) {
+		start = *end
+	}
+	end := start.Add(time.Duration(days) * 24 * time.Hour)
+	if err := repos.Billing.UpsertSubscription(ctx, model.Subscription{UserID: userID, Plan: "pro", Provider: "manual",
+		ProviderRef: ref, ProductID: "manual", Status: "active", PeriodEnd: &end}); err != nil {
+		return time.Time{}, fmt.Errorf("simpan pro manual: %w", err)
+	}
+	return end, syncPlan(ctx, repos, userID)
 }
 
 // SyncFromRevenueCat memaksa cek ke REST RevenueCat (dipanggil app setelah pembelian).

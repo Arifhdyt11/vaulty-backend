@@ -74,6 +74,13 @@ type Config struct {
 	RevenueCatWebhookSecret string
 	RevenueCatAPIKey        string
 
+	// SMTP untuk email OTP (ADR-022). Kosong: development menulis email ke log, production mematikan fitur email.
+	SMTPHost string
+	SMTPPort int
+	SMTPUser string
+	SMTPPass string
+	MailFrom string
+
 	WorkerConcurrency int
 	LogJSON           bool
 }
@@ -141,6 +148,12 @@ func Load() (Config, error) {
 
 		RevenueCatWebhookSecret: get("REVENUECAT_WEBHOOK_SECRET", ""),
 		RevenueCatAPIKey:        get("REVENUECAT_API_KEY", ""),
+
+		SMTPHost: get("SMTP_HOST", ""),
+		SMTPPort: getInt("SMTP_PORT", 587),
+		SMTPUser: get("SMTP_USER", ""),
+		SMTPPass: get("SMTP_PASS", ""),
+		MailFrom: get("MAIL_FROM", "Vaulty <no-reply@vaulty.id>"),
 
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 4),
 		LogJSON:           getBool("LOG_JSON", false),

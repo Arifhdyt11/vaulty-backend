@@ -22,6 +22,7 @@ import (
 	"vaulty/pkg/ai"
 	"vaulty/pkg/fetch"
 	"vaulty/pkg/googleauth"
+	"vaulty/pkg/mail"
 	"vaulty/pkg/media"
 	"vaulty/pkg/push"
 	"vaulty/pkg/storage"
@@ -50,6 +51,8 @@ type App struct {
 	Billing  *service.BillingService
 	Account  *service.AccountService
 	Briefing *service.BriefingService
+	Settings *service.SettingsService
+	Admin    *service.AdminService
 }
 
 func Logger(cfg config.Config) {
@@ -131,8 +134,14 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 
 	// Services
-	a.Auth = service.NewAuthService(a.Repos, gv, service.AuthConfig{AccessTTL: cfg.AccessTTL, RefreshTTL: cfg.RefreshTTL, RegistrationOpen: cfg.RegistrationOpen, AllowedEmails: cfg.AllowedEmails})
-	a.Ent = service.NewEntitlementService(a.Repos)
+	a.Auth = service.NewAuthService(a.Repos, gv, service.AuthConfig{AccessTTL: cfg.AccessTTL, RefreshTTL: cfg.RefreshTTL,
+		RegistrationOpen: cfg.RegistrationOpen, AllowedEmails: cfg.AllowedEmails, Secret: cfg.AppSecret, Mail: newMailer(cfg)})
+	a.Settings = service.NewSettingsService(a.Repos)
+	if err := a.Settings.Reload(ctx); err != nil {
+		slog.Warn("muat pengaturan admin gagal; pakai default", "err", err)
+	}
+	a.Ent = service.NewEntitlementService(a.Repos, a.Settings)
+	a.Admin = service.NewAdminService(a.Repos, a.Auth, a.Ent, a.Settings, cfg.MaxUploadProMB)
 	a.Remind = service.NewReminderService(a.Repos, a.AI, cfg.AIChatModel, a.AIOn)
 	a.Items = service.NewItemService(a.Repos, a.Store, a.Queue, a.Ent, a.Remind)
 	a.Remind.SetItems(a.Items)
@@ -164,5 +173,18 @@ func (a *App) Close() {
 	}
 	if a.Pool != nil {
 		a.Pool.Close()
+	}
+}
+
+// newMailer: SMTP bila dikonfigurasi; tanpa SMTP, development menulis email ke log dan production mematikan fitur email.
+func newMailer(cfg config.Config) mail.Sender {
+	switch {
+	case cfg.SMTPHost != "":
+		return mail.NewSMTP(mail.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.MailFrom})
+	case cfg.IsProd():
+		slog.Warn("SMTP_HOST kosong: verifikasi email & lupa password dimatikan")
+		return mail.Disabled{}
+	default:
+		return mail.Log{}
 	}
 }

@@ -15,6 +15,9 @@ type User struct {
 	Plan      string    `json:"plan" enum:"free,pro"`
 	Role      string    `json:"role" enum:"user,admin"`
 	CreatedAt time.Time `json:"created_at"`
+	// ADR-022: web meminta OTP bila false; HasPassword false = akun Google tanpa password.
+	EmailVerified bool `json:"email_verified"`
+	HasPassword   bool `json:"has_password"`
 }
 
 // Location mengembalikan zona waktu user; jatuh ke Asia/Jakarta bila tidak valid.
@@ -39,6 +42,7 @@ type Quota struct {
 	Metric   string    `json:"metric"`
 	Limit    int       `json:"limit" doc:"-1 berarti tanpa batas"`
 	Used     int       `json:"used"`
+	Bonus    int       `json:"bonus,omitempty" doc:"Kuota tambahan periode ini (sudah termasuk di limit)"`
 	ResetsAt time.Time `json:"resets_at"`
 }
 
@@ -298,4 +302,154 @@ type AdminOverview struct {
 	Conversations    int             `json:"conversations"`
 	Daily            []AdminDayPoint `json:"daily"`
 	RecentUsers      []AdminUser     `json:"recent_users"`
+}
+
+// ---- konsol admin (ADR-021) ----
+
+type AdminUserFilter struct {
+	Q, Plan, Role, Status string
+	Limit, Offset         int
+}
+
+type AdminUserRow struct {
+	ID            int64      `json:"id"`
+	Email         string     `json:"email"`
+	Name          string     `json:"name"`
+	AvatarURL     *string    `json:"avatar_url"`
+	Timezone      string     `json:"timezone"`
+	Plan          string     `json:"plan"`
+	Role          string     `json:"role"`
+	Items         int        `json:"items"`
+	CreatedAt     time.Time  `json:"created_at"`
+	SuspendedAt   *time.Time `json:"suspended_at"`
+	LastActiveAt  *time.Time `json:"last_active_at"`
+	EmailVerified bool       `json:"email_verified"`
+	HasPassword   bool       `json:"has_password"`
+	GoogleLinked  bool       `json:"google_linked"`
+}
+
+type AdminUserStats struct {
+	Items         int `json:"items"`
+	ItemsReady    int `json:"items_ready"`
+	ItemsFailed   int `json:"items_failed"`
+	Reminders     int `json:"reminders"`
+	Conversations int `json:"conversations"`
+	Questions30d  int `json:"questions_30d"`
+	Devices       int `json:"devices"`
+	Sessions      int `json:"sessions"`
+}
+
+type AdminUserDetail struct {
+	User          AdminUserRow        `json:"user"`
+	Quotas        []Quota             `json:"quotas"`
+	Stats         AdminUserStats      `json:"stats"`
+	Subscriptions []AdminSubscription `json:"subscriptions"`
+	Redemptions   []AdminRedemption   `json:"redemptions"`
+	Activity      []AdminAuditEntry   `json:"activity"`
+}
+
+type AdminSubscription struct {
+	ID        int64      `json:"id"`
+	UserID    int64      `json:"user_id"`
+	Email     string     `json:"email"`
+	Name      string     `json:"name"`
+	Plan      string     `json:"plan"`
+	Provider  string     `json:"provider"`
+	ProductID string     `json:"product_id"`
+	Status    string     `json:"status"`
+	PeriodEnd *time.Time `json:"period_end"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type AdminSubscriptionFilter struct {
+	Q, Status, Provider string
+	Limit, Offset       int
+}
+
+type AdminSubscriptionSummary struct {
+	Active    int `json:"active"`
+	Grace     int `json:"grace"`
+	Expired   int `json:"expired"`
+	Cancelled int `json:"cancelled"`
+	Manual    int `json:"manual" doc:"Pro manual aktif (admin/kupon)"`
+	Store     int `json:"store" doc:"Langganan toko aktif (RevenueCat)"`
+	ProUsers  int `json:"pro_users"`
+}
+
+type Coupon struct {
+	ID             int64      `json:"id"`
+	Code           string     `json:"code"`
+	Description    string     `json:"description"`
+	Kind           string     `json:"kind" enum:"pro_days,bonus"`
+	Metric         string     `json:"metric"`
+	Amount         int        `json:"amount"`
+	MaxRedemptions int        `json:"max_redemptions" doc:"0 = tanpa batas"`
+	Redeemed       int        `json:"redeemed"`
+	StartsAt       *time.Time `json:"starts_at"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	Active         bool       `json:"active"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type AdminRedemption struct {
+	Code      string    `json:"code"`
+	Kind      string    `json:"kind"`
+	Metric    string    `json:"metric"`
+	Amount    int       `json:"amount"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AdminAuditEntry struct {
+	ID         int64           `json:"id"`
+	ActorID    *int64          `json:"actor_id"`
+	ActorEmail string          `json:"actor_email"`
+	Action     string          `json:"action"`
+	Entity     string          `json:"entity"`
+	EntityID   *int64          `json:"entity_id"`
+	Metadata   json.RawMessage `json:"metadata"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+type AdminCount struct {
+	Key   string `json:"key"`
+	Count int    `json:"count"`
+}
+
+type AdminReportDay struct {
+	Date        string `json:"date"`
+	NewUsers    int    `json:"new_users"`
+	ActiveUsers int    `json:"active_users"`
+	Items       int    `json:"items"`
+	Questions   int    `json:"questions"`
+}
+
+type AdminReportTotals struct {
+	NewUsers    int `json:"new_users"`
+	ActiveUsers int `json:"active_users"`
+	Items       int `json:"items"`
+	Questions   int `json:"questions"`
+	Redemptions int `json:"redemptions"`
+	Reminders   int `json:"reminders"`
+}
+
+type AdminTopUser struct {
+	ID        int64  `json:"id"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	Plan      string `json:"plan"`
+	Items     int    `json:"items"`
+	Questions int    `json:"questions"`
+}
+
+type AdminReport struct {
+	Days          int               `json:"days"`
+	Totals        AdminReportTotals `json:"totals"`
+	Previous      AdminReportTotals `json:"previous" doc:"Periode sebelumnya dengan panjang sama"`
+	Daily         []AdminReportDay  `json:"daily"`
+	ItemsByKind   []AdminCount      `json:"items_by_kind"`
+	ItemsByStatus []AdminCount      `json:"items_by_status"`
+	Plans         []AdminCount      `json:"plans"`
+	Subscriptions []AdminCount      `json:"subscriptions"`
+	TopUsers      []AdminTopUser    `json:"top_users"`
 }

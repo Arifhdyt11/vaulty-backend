@@ -149,7 +149,8 @@ func (h *Handlers) RegisterBilling(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "billing-plans", Method: http.MethodGet, Path: "/billing/plans", Summary: "Paket & batas", Tags: []string{"billing"}, Security: middleware.Secured},
 		func(ctx context.Context, _ *struct{}) (*struct {
 			Body struct {
-				Plans []service.PlanInfo `json:"plans"`
+				Plans      []service.PlanInfo `json:"plans"`
+				ProEnabled bool               `json:"pro_enabled" doc:"false = jangan tampilkan paywall/upgrade (ADR-021)"`
 			}
 		}, error) {
 			plans, err := h.Ent.Plans(ctx)
@@ -158,10 +159,12 @@ func (h *Handlers) RegisterBilling(api huma.API) {
 			}
 			out := &struct {
 				Body struct {
-					Plans []service.PlanInfo `json:"plans"`
+					Plans      []service.PlanInfo `json:"plans"`
+					ProEnabled bool               `json:"pro_enabled" doc:"false = jangan tampilkan paywall/upgrade (ADR-021)"`
 				}
 			}{}
 			out.Body.Plans = plans
+			out.Body.ProEnabled = h.Settings == nil || h.Settings.ProEnabled(ctx)
 			return out, nil
 		})
 

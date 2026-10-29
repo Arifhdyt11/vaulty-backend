@@ -36,7 +36,7 @@ func E(err error) error {
 	}
 	var qe *model.QuotaError
 	if errors.As(err, &qe) {
-		return &QuotaProblem{Status: http.StatusPaymentRequired, Title: "Kuota habis", Detail: qe.Error(), Metric: qe.Metric, Limit: qe.Limit, Used: qe.Used, ResetsAt: qe.ResetsAt, Upgrade: true}
+		return &QuotaProblem{Status: http.StatusPaymentRequired, Title: "Kuota habis", Detail: qe.Error(), Metric: qe.Metric, Limit: qe.Limit, Used: qe.Used, ResetsAt: qe.ResetsAt, Upgrade: qe.Upgrade}
 	}
 	var se huma.StatusError
 	if errors.As(err, &se) {
@@ -55,6 +55,12 @@ func E(err error) error {
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, model.ErrBadCredentials):
 		return huma.Error401Unauthorized(model.ErrBadCredentials.Error())
+	case errors.Is(err, model.ErrSuspended):
+		return huma.Error403Forbidden(model.ErrSuspended.Error())
+	case errors.Is(err, model.ErrTooMany):
+		return huma.Error429TooManyRequests(model.ErrTooMany.Error())
+	case errors.Is(err, model.ErrMailOff):
+		return huma.Error503ServiceUnavailable(model.ErrMailOff.Error())
 	case errors.Is(err, model.ErrRegistrationOff):
 		return huma.Error403Forbidden(model.ErrRegistrationOff.Error())
 	case errors.Is(err, model.ErrTooLarge):

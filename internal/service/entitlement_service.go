@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"vaulty/internal/model"
@@ -31,28 +32,99 @@ type PlanRules struct {
 	BriefingChapters int    // jumlah bab Siaran Vee per hari (ADR-016)
 }
 
-var planRules = map[string]PlanRules{
+// Default di kode; admin bisa menimpa lewat app_settings.plan_rules (ADR-021).
+var defaultPlanRules = map[string]PlanRules{
 	"free": {MaxUploadMB: 5, TrashRetention: 7 * 24 * time.Hour, ChatHistory: 7 * 24 * time.Hour, STTMaxMinutes: 0, AISuggestReminds: false, QueuePriority: "default", BriefingChapters: 3},
 	"pro":  {MaxUploadMB: 50, TrashRetention: 30 * 24 * time.Hour, ChatHistory: 0, STTMaxMinutes: 30, AISuggestReminds: true, QueuePriority: "critical", BriefingChapters: 5},
 }
 
+// activeRules diisi SettingsService tiap memuat pengaturan. Sengaja state paket
+// (bukan dependency) karena RulesFor dipanggil dari banyak tempat tanpa ctx;
+// nilainya hanya cermin app_settings dan aman dibaca bersamaan.
+var activeRules atomic.Pointer[map[string]PlanRules]
+
 func RulesFor(plan string) PlanRules {
-	if r, ok := planRules[plan]; ok {
+	m := defaultPlanRules
+	if p := activeRules.Load(); p != nil {
+		m = *p
+	}
+	if r, ok := m[plan]; ok {
 		return r
 	}
-	return planRules["free"]
+	return m["free"]
 }
+
+// SetPlanRules memasang aturan efektif (default + override admin).
+func SetPlanRules(m map[string]PlanRules) { activeRules.Store(&m) }
 
 // EntitlementService: semua keputusan Free/Pro di backend, app hanya menampilkan.
 type EntitlementService struct {
-	repos  *repository.Repos
-	mu     sync.RWMutex
-	limits map[string]map[string]model.PlanLimit // plan → metric → limit
-	loaded time.Time
+	repos    *repository.Repos
+	settings *SettingsService // nil di tes; dianggap Pro aktif
+	mu       sync.RWMutex
+	limits   map[string]map[string]model.PlanLimit // plan → metric → limit
+	loaded   time.Time
 }
 
-func NewEntitlementService(repos *repository.Repos) *EntitlementService {
-	return &EntitlementService{repos: repos}
+func NewEntitlementService(repos *repository.Repos, settings *SettingsService) *EntitlementService {
+	return &EntitlementService{repos: repos, settings: settings}
+}
+
+// InvalidateLimits memaksa plan_limits dibaca ulang (setelah admin mengubah limit).
+func (s *EntitlementService) InvalidateLimits() {
+	s.mu.Lock()
+	s.limits = nil
+	s.mu.Unlock()
+}
+
+// upgradeable: tawaran upgrade hanya bila Pro dibuka dan user belum Pro.
+func (s *EntitlementService) upgradeable(ctx context.Context, u model.User) bool {
+	return u.Plan != "pro" && (s.settings == nil || s.settings.ProEnabled(ctx))
+}
+
+func (s *EntitlementService) quotaErr(ctx context.Context, u model.User, metric string, limit, used int, reset time.Time) error {
+	return &model.QuotaError{Metric: metric, Limit: limit, Used: used, ResetsAt: reset, Upgrade: s.upgradeable(ctx, u)}
+}
+
+// PeriodKey: kunci periode berjalan untuk metric (dipakai reset/bonus kuota).
+func (s *EntitlementService) PeriodKey(ctx context.Context, u model.User, metric string) (string, error) {
+	limits, err := s.limitsFor(ctx, u.Plan)
+	if err != nil {
+		return "", err
+	}
+	l, ok := limits[metric]
+	if !ok {
+		return "", model.Invalid("metric %q tidak dikenal", metric)
+	}
+	key, _ := Period(u, l.Period, time.Now())
+	return key, nil
+}
+
+// ResetUsage mengosongkan pemakaian periode berjalan; metric kosong = semua metric.
+func (s *EntitlementService) ResetUsage(ctx context.Context, u model.User, metric string) error {
+	limits, err := s.limitsFor(ctx, u.Plan)
+	if err != nil {
+		return err
+	}
+	for m, l := range limits {
+		if metric != "" && m != metric {
+			continue
+		}
+		key, _ := Period(u, l.Period, time.Now())
+		if err := s.repos.Billing.ResetUsage(ctx, u.ID, m, key); err != nil {
+			return fmt.Errorf("reset kuota %s: %w", m, err)
+		}
+	}
+	return nil
+}
+
+// AddBonus menambah kuota periode berjalan untuk satu metric.
+func (s *EntitlementService) AddBonus(ctx context.Context, u model.User, metric string, n int) error {
+	key, err := s.PeriodKey(ctx, u, metric)
+	if err != nil {
+		return err
+	}
+	return s.repos.Billing.AddBonus(ctx, u.ID, metric, key, n)
 }
 
 func (s *EntitlementService) limitsFor(ctx context.Context, plan string) (map[string]model.PlanLimit, error) {
@@ -106,12 +178,12 @@ func (s *EntitlementService) Check(ctx context.Context, u model.User, metric str
 		return nil
 	}
 	key, reset := Period(u, l.Period, time.Now())
-	used, err := s.repos.Billing.Usage(ctx, u.ID, metric, key)
+	used, bonus, err := s.repos.Billing.Usage(ctx, u.ID, metric, key)
 	if err != nil {
 		return err
 	}
-	if used+n > l.Limit {
-		return &model.QuotaError{Metric: metric, Limit: l.Limit, Used: used, ResetsAt: reset}
+	if used+n > l.Limit+bonus {
+		return s.quotaErr(ctx, u, metric, l.Limit+bonus, used, reset)
 	}
 	return nil
 }
@@ -127,15 +199,15 @@ func (s *EntitlementService) Consume(ctx context.Context, u model.User, metric s
 		return nil
 	}
 	key, reset := Period(u, l.Period, time.Now())
-	used, err := s.repos.Billing.Consume(ctx, u.ID, metric, key, n)
+	used, bonus, err := s.repos.Billing.Consume(ctx, u.ID, metric, key, n)
 	if err != nil {
 		return err
 	}
-	if l.Limit >= 0 && used > l.Limit {
-		if _, rerr := s.repos.Billing.Consume(ctx, u.ID, metric, key, -n); rerr != nil {
+	if l.Limit >= 0 && used > l.Limit+bonus {
+		if _, _, rerr := s.repos.Billing.Consume(ctx, u.ID, metric, key, -n); rerr != nil {
 			slog.WarnContext(ctx, "rollback kuota gagal", "metric", metric, "err", rerr)
 		}
-		return &model.QuotaError{Metric: metric, Limit: l.Limit, Used: used - n, ResetsAt: reset}
+		return s.quotaErr(ctx, u, metric, l.Limit+bonus, used-n, reset)
 	}
 	return nil
 }
@@ -153,20 +225,25 @@ func (s *EntitlementService) Quotas(ctx context.Context, u model.User) ([]model.
 			continue
 		}
 		key, reset := Period(u, l.Period, time.Now())
-		used, err := s.repos.Billing.Usage(ctx, u.ID, m, key)
+		used, bonus, err := s.repos.Billing.Usage(ctx, u.ID, m, key)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, model.Quota{Metric: m, Limit: l.Limit, Used: used, ResetsAt: reset})
+		limit := l.Limit
+		if limit >= 0 {
+			limit += bonus
+		}
+		out = append(out, model.Quota{Metric: m, Limit: limit, Used: used, Bonus: bonus, ResetsAt: reset})
 	}
 	return out, nil
 }
 
 type PlanInfo struct {
-	Plan       string         `json:"plan"`
-	PriceLabel string         `json:"price_label,omitempty"`
-	Limits     map[string]int `json:"limits"`
-	Rules      map[string]any `json:"rules"`
+	Plan       string            `json:"plan"`
+	PriceLabel string            `json:"price_label,omitempty"`
+	Limits     map[string]int    `json:"limits"`
+	Periods    map[string]string `json:"periods" doc:"metric → day|month"`
+	Rules      map[string]any    `json:"rules"`
 }
 
 func (s *EntitlementService) Plans(ctx context.Context) ([]PlanInfo, error) {
@@ -175,19 +252,21 @@ func (s *EntitlementService) Plans(ctx context.Context) ([]PlanInfo, error) {
 		return nil, err
 	}
 	byPlan := map[string]map[string]int{}
+	periods := map[string]map[string]string{}
 	for _, l := range all {
 		if byPlan[l.Plan] == nil {
-			byPlan[l.Plan] = map[string]int{}
+			byPlan[l.Plan], periods[l.Plan] = map[string]int{}, map[string]string{}
 		}
 		byPlan[l.Plan][l.Metric] = l.Limit
+		periods[l.Plan][l.Metric] = l.Period
 	}
 	out := []PlanInfo{}
 	for _, p := range []string{"free", "pro"} {
-		r := RulesFor(p)
-		out = append(out, PlanInfo{Plan: p, Limits: byPlan[p], Rules: map[string]any{
-			"max_upload_mb": r.MaxUploadMB, "trash_days": int(r.TrashRetention.Hours() / 24),
-			"chat_history_days": int(r.ChatHistory.Hours() / 24), "stt_max_minutes_per_item": r.STTMaxMinutes,
-			"ai_suggested_reminders": r.AISuggestReminds, "briefing_chapters": r.BriefingChapters,
+		c := ConfigFromRules(RulesFor(p))
+		out = append(out, PlanInfo{Plan: p, Limits: byPlan[p], Periods: periods[p], Rules: map[string]any{
+			"max_upload_mb": c.MaxUploadMB, "trash_days": c.TrashDays,
+			"chat_history_days": c.ChatHistoryDays, "stt_max_minutes_per_item": c.STTMaxMinutes,
+			"ai_suggested_reminders": c.AISuggestReminds, "briefing_chapters": c.BriefingChapters,
 		}})
 	}
 	return out, nil

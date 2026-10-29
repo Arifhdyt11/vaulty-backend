@@ -160,8 +160,9 @@ func (s *Server) housekeeping(ctx context.Context) {
 	if n, err := s.deps.Billing.DowngradeExpired(ctx); err == nil && n > 0 {
 		slog.InfoContext(ctx, "downgrade pro kedaluwarsa", "n", n)
 	}
-	if s.deps.Chats != nil {
-		if n, err := s.deps.Chats.PruneConversations(ctx, "free", service.RulesFor("free").ChatHistory); err == nil && n > 0 {
+	// ChatHistory 0 = selamanya (bisa diatur admin), jadi jangan dipangkas.
+	if keep := service.RulesFor("free").ChatHistory; s.deps.Chats != nil && keep > 0 {
+		if n, err := s.deps.Chats.PruneConversations(ctx, "free", keep); err == nil && n > 0 {
 			slog.InfoContext(ctx, "riwayat chat free dipangkas", "n", n)
 		}
 	}
@@ -174,7 +175,8 @@ func (s *Server) housekeeping(ctx context.Context) {
 	}
 	if s.deps.Items != nil {
 		// Sampah dikosongkan memakai retensi terpanjang (pro) sebagai batas global yang aman.
-		if n, err := s.deps.Items.PurgeDeleted(ctx, service.RulesFor("pro").TrashRetention); err == nil && len(n) > 0 {
+		keep := max(service.RulesFor("pro").TrashRetention, service.RulesFor("free").TrashRetention)
+		if n, err := s.deps.Items.PurgeDeleted(ctx, keep); err == nil && len(n) > 0 {
 			for _, it := range n {
 				for _, k := range []*string{it.ThumbnailKey, it.FileKey, it.AttachmentKey} {
 					if k != nil && *k != "" && s.deps.Store != nil {
