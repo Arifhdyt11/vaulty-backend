@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildMenyusunMultipartTeksDanHTML(t *testing.T) {
-	b, err := Build("Vaulty <no-reply@vaulty.id>", Message{To: "a@b.id", Subject: "Kode verifikasi Vaulty", Text: "Kode: 123456", HTML: "<b>123456</b>"}, time.Unix(0, 0))
+	b, err := Build("Vaulty <vaulty@mail.reepzs.site>", Message{To: "a@b.id", Subject: "Kode verifikasi Vaulty", Text: "Kode: 123456", HTML: "<b>123456</b>"}, time.Unix(0, 0))
 	if err != nil {
 		t.Fatal(err)
 	}

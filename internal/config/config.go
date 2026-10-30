@@ -153,7 +153,7 @@ func Load() (Config, error) {
 		SMTPPort: getInt("SMTP_PORT", 587),
 		SMTPUser: get("SMTP_USER", ""),
 		SMTPPass: get("SMTP_PASS", ""),
-		MailFrom: get("MAIL_FROM", "Vaulty <no-reply@vaulty.id>"),
+		MailFrom: get("MAIL_FROM", "Vaulty <vaulty@mail.reepzs.site>"),
 
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 4),
 		LogJSON:           getBool("LOG_JSON", false),
