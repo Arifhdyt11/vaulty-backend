@@ -24,3 +24,19 @@ func TestBuildMenolakHeaderInjection(t *testing.T) {
 		t.Fatal("harus menolak baris baru di header")
 	}
 }
+
+func TestBuildMenambahReplyToBilaDiisi(t *testing.T) {
+	b, err := Build("Vaulty <vaulty@mail.reepzs.site>", Message{To: "a@b.id", Subject: "x", Text: "x", ReplyTo: "official@reepzs.site"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "Reply-To: official@reepzs.site\r\n") {
+		t.Error("header Reply-To tidak ada")
+	}
+	if b, _ := Build("Vaulty <x@y.id>", Message{To: "a@b.id", Subject: "x", Text: "x"}, time.Now()); strings.Contains(string(b), "Reply-To") {
+		t.Error("Reply-To kosong tidak boleh menulis header")
+	}
+	if _, err := Build("Vaulty <x@y.id>", Message{To: "a@b.id", Subject: "x", Text: "x", ReplyTo: "a@b.id\r\nBcc: c@d.id"}, time.Now()); err == nil {
+		t.Error("harus menolak baris baru di Reply-To")
+	}
+}

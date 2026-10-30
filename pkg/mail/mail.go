@@ -28,6 +28,7 @@ type Message struct {
 	Subject string
 	Text    string
 	HTML    string
+	ReplyTo string // kosong: pakai SMTPConfig.ReplyTo
 }
 
 type Sender interface {
@@ -41,6 +42,9 @@ type SMTPConfig struct {
 	User string
 	Pass string
 	From string // "Vaulty <no-reply@domain>"
+	// ReplyTo: alamat yang punya inbox. Pengirim (From) hanya untuk kirim, jadi balasan user
+	// diarahkan ke sini supaya tidak hilang.
+	ReplyTo string
 }
 
 type SMTP struct{ cfg SMTPConfig }
@@ -53,6 +57,9 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 	from, err := mail.ParseAddress(s.cfg.From)
 	if err != nil {
 		return fmt.Errorf("MAIL_FROM tidak valid: %w", err)
+	}
+	if m.ReplyTo == "" {
+		m.ReplyTo = s.cfg.ReplyTo
 	}
 	body, err := Build(s.cfg.From, m, time.Now())
 	if err != nil {
@@ -115,7 +122,7 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 
 // Build menyusun pesan MIME multipart/alternative (teks + HTML).
 func Build(from string, m Message, now time.Time) ([]byte, error) {
-	if strings.ContainsAny(m.To+m.Subject+from, "\r\n") {
+	if strings.ContainsAny(m.To+m.Subject+m.ReplyTo+from, "\r\n") {
 		return nil, errors.New("header email tidak boleh berisi baris baru")
 	}
 	boundary := randomBoundary()
@@ -123,6 +130,9 @@ func Build(from string, m Message, now time.Time) ([]byte, error) {
 	h := func(k, v string) { fmt.Fprintf(&b, "%s: %s\r\n", k, v) }
 	h("From", from)
 	h("To", m.To)
+	if m.ReplyTo != "" {
+		h("Reply-To", m.ReplyTo)
+	}
 	h("Subject", mime.QEncoding.Encode("utf-8", m.Subject))
 	h("Date", now.Format(time.RFC1123Z))
 	h("MIME-Version", "1.0")

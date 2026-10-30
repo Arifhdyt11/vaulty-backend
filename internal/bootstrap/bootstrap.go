@@ -180,7 +180,7 @@ func (a *App) Close() {
 func newMailer(cfg config.Config) mail.Sender {
 	switch {
 	case cfg.SMTPHost != "":
-		return mail.NewSMTP(mail.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.MailFrom})
+		return mail.NewSMTP(mail.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.MailFrom, ReplyTo: cfg.MailReplyTo})
 	case cfg.IsProd():
 		slog.Warn("SMTP_HOST kosong: verifikasi email & lupa password dimatikan")
 		return mail.Disabled{}
