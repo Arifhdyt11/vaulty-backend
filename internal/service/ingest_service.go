@@ -351,7 +351,7 @@ func setIf(dst **string, v string) {
 func (s *IngestService) stageTranscribe(ctx context.Context, u model.User, it *model.Item) model.Stage {
 	switch it.Kind {
 	case "image":
-		return s.vision(ctx, u, it, *it.FileKey, false)
+		return s.vision(ctx, u, it, *it.FileKey, "", true)
 	case "file":
 		return s.extractFile(ctx, u, it)
 	case "audio":
@@ -359,17 +359,19 @@ func (s *IngestService) stageTranscribe(ctx context.Context, u model.User, it *m
 	case "url":
 		// Screenshot pendamping (fallback sosmed): OCR lalu gabung dengan konten.
 		if it.AttachmentKey != nil && *it.AttachmentKey != "" {
-			return s.vision(ctx, u, it, *it.AttachmentKey, true)
+			return s.vision(ctx, u, it, *it.AttachmentKey, "Dari screenshot", true)
 		}
 		if it.Platform != nil && media.Supported(*it.Platform) {
-			return s.transcribeVideo(ctx, u, it)
+			return s.coverFallback(ctx, u, it, s.transcribeVideo(ctx, u, it))
 		}
 		return model.Stage{Status: "skipped"}
 	}
 	return model.Stage{Status: "skipped"}
 }
 
-func (s *IngestService) vision(ctx context.Context, u model.User, it *model.Item, key string, appendMode bool) model.Stage {
+// vision membaca gambar lewat model vision. label kosong: hasil menggantikan isi item; label
+// terisi: hasil ditambahkan di bawah isi asli dengan penanda "[label]".
+func (s *IngestService) vision(ctx context.Context, u model.User, it *model.Item, key, label string, setTitle bool) model.Stage {
 	if !s.aiOn {
 		return model.Stage{Status: "skipped", Error: "AI nonaktif"}
 	}
@@ -398,11 +400,17 @@ func (s *IngestService) vision(ctx context.Context, u model.User, it *model.Item
 		out.Text = resp.Content
 	}
 	text := extract.Clean(strings.TrimSpace(out.Description + "\n\n" + out.Text))
-	if appendMode && it.ContentText != nil && *it.ContentText != "" {
-		text = *it.ContentText + "\n\n[Dari screenshot]\n" + text
+	if label != "" {
+		text = "[" + label + "]\n" + text
+		if it.ContentText != nil {
+			// Buang hanya hasil label yang sama dari proses sebelumnya; transkrip tetap.
+			if base := cutAt(*it.ContentText, "["+label+"]"); base != "" {
+				text = base + "\n\n" + text
+			}
+		}
 	}
 	var title *string
-	if out.Description != "" {
+	if setTitle && out.Description != "" {
 		t := ai.Truncate(strings.Split(out.Description, ".")[0], 80)
 		title = &t
 	}

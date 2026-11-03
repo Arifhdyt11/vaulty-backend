@@ -41,7 +41,11 @@ type Options struct {
 	Timeout      time.Duration // default 6 menit untuk unduh
 }
 
-type Tool struct{ opts Options }
+type Tool struct {
+	opts Options
+	// retryDelays: jeda sebelum percobaan ulang yt-dlp untuk error sementara.
+	retryDelays []time.Duration
+}
 
 func New(opts Options) *Tool {
 	if opts.YtDlpPath == "" {
@@ -62,7 +66,40 @@ func New(opts Options) *Tool {
 	if opts.Timeout == 0 {
 		opts.Timeout = 6 * time.Minute
 	}
-	return &Tool{opts: opts}
+	return &Tool{opts: opts, retryDelays: []time.Duration{3 * time.Second, 8 * time.Second}}
+}
+
+// retry menjalankan fn lagi selama error-nya sementara (lihat transient), sesuai retryDelays.
+func (t *Tool) retry(ctx context.Context, fn func() error) error {
+	err := fn()
+	for _, d := range t.retryDelays {
+		if err == nil || !transient(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(d):
+		}
+		err = fn()
+	}
+	return err
+}
+
+// transient: error yt-dlp yang biasanya hilang bila dicoba lagi (halaman tanpa data,
+// gangguan jaringan, 5xx). Login/privat/bukan video tidak termasuk.
+func transient(err error) bool {
+	if errors.Is(err, ErrToolMissing) {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	for _, s := range []string{"unable to extract webpage video data", "unable to download webpage", "timed out",
+		"connection reset", "temporary failure", "http error 5"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // Available memeriksa ketiga binary ada di PATH.
@@ -112,10 +149,17 @@ type Info struct {
 }
 
 // Probe membaca metadata tanpa mengunduh, untuk cek durasi & kuota lebih dulu.
+// TikTok kadang mengirim halaman tanpa data video ke klien non-browser; percobaan
+// berikutnya biasanya berhasil, jadi error sementara dicoba ulang.
 func (t *Tool) Probe(ctx context.Context, url string) (Info, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	out, err := t.run(ctx, t.opts.YtDlpPath, "--no-playlist", "--no-warnings", "--skip-download", "-J", url)
+	var out []byte
+	err := t.retry(ctx, func() error {
+		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		var err error
+		out, err = t.run(ctx, t.opts.YtDlpPath, "--no-playlist", "--no-warnings", "--skip-download", "-J", url)
+		return err
+	})
 	if err != nil {
 		return Info{}, classify(err)
 	}
@@ -161,7 +205,10 @@ func (t *Tool) Download(ctx context.Context, url, dir string, maxDuration int) (
 		args = append(args, "--match-filter", fmt.Sprintf("duration <=? %d", maxDuration))
 	}
 	args = append(args, url)
-	if _, err := t.run(ctx, t.opts.YtDlpPath, args...); err != nil {
+	if err := t.retry(ctx, func() error {
+		_, err := t.run(ctx, t.opts.YtDlpPath, args...)
+		return err
+	}); err != nil {
 		return "", classify(err)
 	}
 	matches, _ := filepath.Glob(filepath.Join(dir, "video.*"))
@@ -248,7 +295,8 @@ func classify(err error) error {
 	switch {
 	case strings.Contains(m, "login") || strings.Contains(m, "cookies") || strings.Contains(m, "sign in") || strings.Contains(m, "private"):
 		return fmt.Errorf("%w: %v", ErrLoginNeeded, err)
-	case strings.Contains(m, "no video formats") || strings.Contains(m, "there is no video"):
+	// "Unsupported URL": mis. post foto/slideshow TikTok (/photo/) yang tidak berisi video.
+	case strings.Contains(m, "no video formats") || strings.Contains(m, "there is no video") || strings.Contains(m, "unsupported url"):
 		return fmt.Errorf("%w: %v", ErrNoVideo, err)
 	}
 	return err

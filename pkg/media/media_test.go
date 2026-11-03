@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestSupported(t *testing.T) {
@@ -28,6 +31,72 @@ func TestClassify(t *testing.T) {
 	}
 	if !errors.Is(classify(errors.New("ERROR: [Instagram] xyz: There is no video in this post")), ErrNoVideo) {
 		t.Fatal("harus ErrNoVideo")
+	}
+	if !errors.Is(classify(errors.New("ERROR: Unsupported URL: https://www.tiktok.com/@a/photo/123")), ErrNoVideo) {
+		t.Fatal("post foto TikTok harus ErrNoVideo")
+	}
+}
+
+func TestTransient(t *testing.T) {
+	if !transient(errors.New("yt-dlp: exit status 1: ERROR: [TikTok] 123: Unable to extract webpage video data; please report this issue")) {
+		t.Fatal("halaman TikTok tanpa data harus dicoba ulang")
+	}
+	for _, m := range []string{"ERROR: [TikTok] 1: This video is private", "ERROR: Unsupported URL: https://x"} {
+		if transient(errors.New(m)) {
+			t.Fatalf("%q bukan error sementara", m)
+		}
+	}
+	if transient(ErrToolMissing) {
+		t.Fatal("alat hilang bukan error sementara")
+	}
+}
+
+// yt-dlp palsu yang gagal "Unable to extract webpage video data" sampai percobaan ke-n,
+// lalu mencetak metadata JSON. Menguji Probe mencoba ulang error sementara.
+func fakeYtDlp(t *testing.T, failTimes int) (*Tool, string) {
+	t.Helper()
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	script := filepath.Join(dir, "yt-dlp")
+	body := `#!/bin/sh
+n=$(cat "` + count + `" 2>/dev/null || echo 0)
+n=$((n+1))
+echo $n > "` + count + `"
+if [ $n -le ` + strconv.Itoa(failTimes) + ` ]; then
+  echo "ERROR: [TikTok] 1: Unable to extract webpage video data" >&2
+  exit 1
+fi
+echo '{"duration":28.4,"title":"judul","description":"caption lengkap","uploader":"u","vcodec":"h264"}'
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := New(Options{YtDlpPath: script})
+	tool.retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	return tool, count
+}
+
+func TestProbeMencobaUlangErrorSementara(t *testing.T) {
+	tool, count := fakeYtDlp(t, 2)
+	info, err := tool.Probe(context.Background(), "https://vt.tiktok.com/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Description != "caption lengkap" || info.Duration != 28 || !info.HasVideo {
+		t.Fatalf("%+v", info)
+	}
+	if b, _ := os.ReadFile(count); strings.TrimSpace(string(b)) != "3" {
+		t.Fatalf("harus 3 percobaan, dapat %s", b)
+	}
+}
+
+func TestProbeMenyerahSetelahBatas(t *testing.T) {
+	tool, count := fakeYtDlp(t, 5)
+	if _, err := tool.Probe(context.Background(), "https://vt.tiktok.com/x"); err == nil {
+		t.Fatal("harus gagal")
+	}
+	if b, _ := os.ReadFile(count); strings.TrimSpace(string(b)) != "3" {
+		t.Fatalf("harus berhenti di 3 percobaan, dapat %s", b)
 	}
 }
 

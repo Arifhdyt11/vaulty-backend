@@ -43,9 +43,9 @@ func (f *Fetcher) getOEmbed(ctx context.Context, endpoint string, params url.Val
 func (f *Fetcher) fetchTikTok(ctx context.Context, res *Result, sourceURL string) error {
 	res.ContentType = "video"
 	res.SiteName = "TikTok"
-	// Halaman TikTok dengan User-Agent pratinjau link memberi og:image + caption, dan ikut
-	// redirect link pendek (vt./vm.tiktok.com). oEmbed kini sering tanpa thumbnail, jadi
-	// hanya dipakai untuk mengisi yang masih kosong.
+	// Halaman TikTok dengan User-Agent pratinjau link memberi og:image, dan ikut redirect link
+	// pendek (vt./vm.tiktok.com). Sejak akhir 2026 OG maupun oEmbed tidak lagi membawa caption;
+	// caption diambil dari metadata yt-dlp di tahap transcribe (service.saveCaption).
 	f.tryOGUA(ctx, res, sourceURL, linkPreviewUserAgent)
 	if res.ThumbnailURL == "" || res.Description == "" {
 		if o, err := f.getOEmbed(ctx, f.tiktokOEmbed, url.Values{"url": {res.CanonicalURL}}); err != nil {

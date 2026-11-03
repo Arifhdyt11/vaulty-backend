@@ -204,6 +204,46 @@ func TestTranscribeVideoTanpaAlatDilewati(t *testing.T) {
 	}
 }
 
+func TestBaseContentMembuangBagianBuatan(t *testing.T) {
+	in := "caption asli\n\n[Transkrip video]\nhalo\n\n[Isi layar video]\nteks"
+	if got := baseContent(in); got != "caption asli" {
+		t.Fatalf("%q", got)
+	}
+	if got := baseContent("[Dari gambar sampul]\nseorang wanita"); got != "" {
+		t.Fatalf("isi dari gambar sampul bukan isi asli: %q", got)
+	}
+	if got := cutAt("halaman\n\n[Transkrip video]\nx\n\n[Dari screenshot]\nlama", "[Dari screenshot]"); got != "halaman\n\n[Transkrip video]\nx" {
+		t.Fatalf("screenshot ulang tidak boleh membuang transkrip: %q", got)
+	}
+}
+
+func TestHasContent(t *testing.T) {
+	empty, cover, caption, desc := "", "[Dari gambar sampul]\nfoto", "caption", "deskripsi"
+	cases := []struct {
+		it   model.Item
+		want bool
+	}{
+		{model.Item{}, false},
+		{model.Item{ContentText: &empty}, false},
+		{model.Item{ContentText: &cover}, false},
+		{model.Item{ContentText: &caption}, true},
+		{model.Item{Description: &desc}, true},
+	}
+	for i, c := range cases {
+		if hasContent(c.it) != c.want {
+			t.Fatalf("kasus %d: harus %v", i, c.want)
+		}
+	}
+}
+
+func TestCoverFallbackTanpaThumbnailTetap(t *testing.T) {
+	s := &IngestService{aiOn: true}
+	st := model.Stage{Status: "failed", Error: "baca video: x"}
+	if got := s.coverFallback(context.Background(), model.User{}, &model.Item{Kind: "url"}, st); got != st {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestChunkCutMendahulukanBatasBaris(t *testing.T) {
 	// Titik di "deploy.sh" lebih dekat ke batas, tapi potongan harus di akhir baris.
 	r := []rune("baris satu cukup panjang di sini\ncd vaulty && scripts/deploy.sh --cepat")

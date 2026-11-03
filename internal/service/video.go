@@ -28,10 +28,18 @@ func (s *IngestService) transcribeVideo(ctx context.Context, u model.User, it *m
 		return model.Stage{Status: "skipped", Error: "AI nonaktif"}
 	}
 	rules := RulesFor(u.Plan)
+	mediaOn := s.media != nil && s.media.Available()
 	if rules.STTMaxMinutes == 0 {
+		// Free tanpa transkrip, tapi caption dari metadata yt-dlp tetap diambil bila fetch tidak
+		// mendapatkannya (oEmbed & OG TikTok kini tanpa caption).
+		if mediaOn && !hasContent(*it) {
+			if info, err := s.media.Probe(ctx, *it.SourceURL); err == nil {
+				s.saveCaption(ctx, u, it, info)
+			}
+		}
 		return model.Stage{Status: "skipped", Error: "isi video (transkrip & layar) hanya untuk paket Pro"}
 	}
-	if s.media == nil || !s.media.Available() {
+	if !mediaOn {
 		return model.Stage{Status: "skipped", Error: "yt-dlp/ffmpeg belum terpasang di server"}
 	}
 	src := *it.SourceURL
@@ -44,6 +52,8 @@ func (s *IngestService) transcribeVideo(ctx context.Context, u model.User, it *m
 	case err != nil:
 		return model.Stage{Status: "failed", Error: "baca video: " + ai.Truncate(err.Error(), 200)}
 	}
+	// Caption disimpan sebelum unduh supaya ringkasan tetap jalan bila unduh/transkrip gagal.
+	s.saveCaption(ctx, u, it, info)
 	if !info.HasVideo {
 		return model.Stage{Status: "skipped"}
 	}
@@ -113,8 +123,8 @@ func (s *IngestService) transcribeVideo(ctx context.Context, u model.User, it *m
 	refund = false
 
 	var sb strings.Builder
-	if it.ContentText != nil && strings.TrimSpace(*it.ContentText) != "" {
-		sb.WriteString(strings.TrimSpace(*it.ContentText))
+	if it.ContentText != nil {
+		sb.WriteString(baseContent(*it.ContentText))
 	}
 	if transcript != "" {
 		sb.WriteString("\n\n[Transkrip video]\n" + transcript)
@@ -139,6 +149,67 @@ func (s *IngestService) transcribeVideo(ctx context.Context, u model.User, it *m
 	_ = s.repos.Items.ApplyFetch(ctx, u.ID, it.ID, it.ContentVersion, patch)
 	slog.InfoContext(ctx, "video dibaca", "item_id", it.ID, "detik", int(duration), "frame", len(frames), "transkrip", transcript != "", "ms", time.Since(start).Milliseconds())
 	return model.Stage{Status: "done", Error: strings.Join(warnings, "; ")}
+}
+
+// saveCaption menyimpan caption dari metadata yt-dlp sebagai isi item bila belum ada isi.
+func (s *IngestService) saveCaption(ctx context.Context, u model.User, it *model.Item, info media.Info) {
+	caption := strings.TrimSpace(info.Description)
+	if caption == "" || hasContent(*it) {
+		return
+	}
+	text := extract.Clean(caption)
+	if err := s.repos.Items.SetContentText(ctx, u.ID, it.ID, it.ContentVersion, text, nil); err != nil {
+		slog.WarnContext(ctx, "simpan caption video gagal", "item_id", it.ID, "err", err)
+		return
+	}
+	it.ContentText = &text
+}
+
+// coverFallback: video tidak terbaca dan tanpa caption (post foto TikTok, yt-dlp ditolak
+// platform) → gambar sampul dibaca model vision supaya Vee tetap punya bahan ringkasan.
+// Status tahap asal dipertahankan supaya item gagal tetap bisa dicoba ulang.
+func (s *IngestService) coverFallback(ctx context.Context, u model.User, it *model.Item, st model.Stage) model.Stage {
+	if !s.aiOn || hasContent(*it) || it.ThumbnailKey == nil || *it.ThumbnailKey == "" {
+		return st
+	}
+	vs := s.vision(ctx, u, it, *it.ThumbnailKey, coverLabel, false)
+	if vs.Status != "done" {
+		slog.WarnContext(ctx, "baca gambar sampul gagal", "item_id", it.ID, "err", vs.Error)
+		return st
+	}
+	note := "isi dibaca dari gambar sampul"
+	if st.Error != "" {
+		note = st.Error + "; " + note
+	}
+	return model.Stage{Status: st.Status, Error: note}
+}
+
+// Penanda bagian isi yang dibuat tahap transcribe. Saat item diproses ulang, bagian ini
+// dibuang dulu supaya tidak menumpuk.
+const coverLabel = "Dari gambar sampul"
+
+var generatedMarkers = []string{"[Transkrip video]", "[Isi layar video]", "[" + coverLabel + "]", "[Dari screenshot]"}
+
+// baseContent: isi asli (caption/teks halaman) tanpa bagian buatan tahap transcribe.
+func baseContent(s string) string {
+	for _, m := range generatedMarkers {
+		s = cutAt(s, m)
+	}
+	return strings.TrimSpace(s)
+}
+
+// cutAt memotong s mulai dari penanda m (bagian buatan selalu ditambahkan di akhir isi).
+func cutAt(s, m string) string {
+	if i := strings.Index(s, m); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// hasContent: item sudah punya teks asli untuk diringkas (caption, deskripsi, atau isi halaman).
+func hasContent(it model.Item) bool {
+	return (it.ContentText != nil && baseContent(*it.ContentText) != "") ||
+		(it.Description != nil && strings.TrimSpace(*it.Description) != "")
 }
 
 // readFrames mengirim frame berurutan ke model vision dan mengembalikan teks layar + gambaran visual.
