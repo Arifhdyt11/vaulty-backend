@@ -99,6 +99,19 @@ func (r *ReminderRepo) Update(ctx context.Context, userID, id int64, p ReminderP
 		WHERE id = $1 AND user_id = $2 RETURNING `+reminderCols, id, userID, p.Text, p.RemindAt, p.Repeat, p.LeadMinutes, p.NotifyAt, p.NotifyKind, p.Status))
 }
 
+// Delete menghapus permanen satu reminder milik user (termasuk yang sedang diklaim worker;
+// FinishSend/FailSend pada baris yang sudah hilang hanya jadi no-op).
+func (r *ReminderRepo) Delete(ctx context.Context, userID, id int64) error {
+	t, err := r.db.Exec(ctx, `DELETE FROM reminders WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return err
+	}
+	if t.RowsAffected() == 0 {
+		return model.ErrNotFound
+	}
+	return nil
+}
+
 // ClaimDue mengambil reminder jatuh tempo dengan FOR UPDATE SKIP LOCKED supaya banyak worker aman.
 func (r *ReminderRepo) ClaimDue(ctx context.Context, limit int) ([]model.Reminder, error) {
 	rows, err := r.db.Query(ctx, `UPDATE reminders SET status = 'sending', claimed_at = now(), attempts = attempts + 1, updated_at = now()

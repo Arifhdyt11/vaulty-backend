@@ -226,6 +226,11 @@ func (s *ReminderService) Cancel(ctx context.Context, u model.User, id int64) (m
 	return s.decorate(ctx, r), err
 }
 
+// Delete menghapus reminder permanen (beda dengan Cancel yang menyimpannya di riwayat).
+func (s *ReminderService) Delete(ctx context.Context, u model.User, id int64) error {
+	return s.repos.Reminder.Delete(ctx, u.ID, id)
+}
+
 func (s *ReminderService) Snooze(ctx context.Context, u model.User, id int64, d time.Duration) (model.Reminder, error) {
 	if d < time.Minute || d > 30*24*time.Hour {
 		return model.Reminder{}, model.Invalid("durasi tunda 1 menit - 30 hari")

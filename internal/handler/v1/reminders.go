@@ -104,6 +104,16 @@ func (h *Handlers) RegisterReminders(api huma.API) {
 			return &reminderOut{r}, nil
 		})
 
+	huma.Register(api, huma.Operation{OperationID: "reminder-delete", Method: http.MethodDelete, Path: "/reminders/{id}", Summary: "Hapus reminder permanen", Tags: []string{"reminders"}, Security: middleware.Secured, DefaultStatus: 204},
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id"`
+		}) (*struct{}, error) {
+			if err := h.Remind.Delete(ctx, middleware.UserFrom(ctx), in.ID); err != nil {
+				return nil, handler.E(err)
+			}
+			return nil, nil
+		})
+
 	action := func(id, path, summary string, fn func(ctx context.Context, u model.User, rid int64) (model.Reminder, error)) {
 		huma.Register(api, huma.Operation{OperationID: id, Method: http.MethodPost, Path: path, Summary: summary, Tags: []string{"reminders"}, Security: middleware.Secured},
 			func(ctx context.Context, in *struct {
