@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Deploy backend ke sipantas: build image amd64 di Mac, kirim lewat ssh, migrasi, lalu
+# Deploy backend ke ylabs: build image amd64 di Mac, kirim lewat ssh, migrasi, lalu
 # jalankan ulang api + worker. Server tidak build Go (RAM 2 GB).
 #   scripts/deploy.sh            # build + kirim + migrate + up
-#   HOST=sipantas scripts/deploy.sh
+#   HOST=ylabs scripts/deploy.sh
 # Prasyarat di server: ~/apps/vaulty/.env.backend (lihat deploy/.env.backend.example).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-HOST="${HOST:-sipantas}"
+HOST="${HOST:-ylabs}"
 IMAGE="vaulty-backend:v2"
 REMOTE_DIR="apps/vaulty"
 

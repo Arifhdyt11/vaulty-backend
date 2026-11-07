@@ -1,8 +1,8 @@
 #!/bin/bash
-# Impor catatan Vaulty v1 (dump tabel notes dari sipantas) ke akun Vaulty baru di database lokal.
+# Impor catatan Vaulty v1 (dump tabel notes dari ylabs) ke akun Vaulty baru di database lokal.
 #
 # 1. Ambil dump (jalankan sendiri, butuh akses SSH):
-#    ssh sipantas "docker exec shared-postgres pg_dump -U vaulty -d vaulty -t notes --data-only --column-inserts" > notes-v1.sql
+#    ssh ylabs "docker exec shared-postgres pg_dump -U vaulty -d vaulty -t notes --data-only --column-inserts" > notes-v1.sql
 # 2. Daftar akun di app, lalu:
 #    scripts/import-v1.sh path/ke/notes-v1.sql email@anda.com           # pratinjau (dry run)
 #    scripts/import-v1.sh path/ke/notes-v1.sql email@anda.com --apply   # impor sungguhan

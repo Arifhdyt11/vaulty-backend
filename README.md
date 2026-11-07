@@ -35,7 +35,7 @@ Alur: `router` → `middleware` → `handler/v1` → `service` → `repository` 
 
 ## Menjalankan (development)
 
-Butuh Go 1.26, Docker, `yt-dlp` + `ffmpeg` (`brew install yt-dlp ffmpeg`, untuk isi video), dan akses SSH ke sipantas (AI lewat Hermes + 9router).
+Butuh Go 1.26, Docker, `yt-dlp` + `ffmpeg` (`brew install yt-dlp ffmpeg`, untuk isi video), dan akses SSH ke ylabs (AI lewat Hermes + 9router).
 
 ```bash
 cp .env.example .env     # isi AI_API_KEY & AI_EMBED_API_KEY; port dev 8081 (8080 dipakai proyek lain)
@@ -57,7 +57,7 @@ Push butuh `FCM_CREDENTIALS_FILE` (service account Firebase). Billing butuh `REV
 ## Impor catatan Vaulty v1
 
 ```bash
-ssh sipantas "docker exec shared-postgres pg_dump -U vaulty -d vaulty -t notes --data-only --column-inserts" > notes-v1.sql
+ssh ylabs "docker exec shared-postgres pg_dump -U vaulty -d vaulty -t notes --data-only --column-inserts" > notes-v1.sql
 scripts/import-v1.sh notes-v1.sql email@anda.com           # pratinjau
 scripts/import-v1.sh notes-v1.sql email@anda.com --apply   # impor (idempoten, tanpa kuota)
 ```

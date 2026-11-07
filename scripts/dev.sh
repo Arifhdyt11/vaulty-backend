@@ -1,6 +1,6 @@
 #!/bin/bash
 # Nyalakan semua kebutuhan dev Vaulty di Mac: Docker (Postgres+Redis), tunnel AI
-# ke sipantas, API, dan worker. Log di /tmp/vaulty-*.log. Aman dijalankan ulang:
+# ke ylabs, API, dan worker. Log di /tmp/vaulty-*.log. Aman dijalankan ulang:
 # yang sudah hidup tidak diganggu.
 #   scripts/dev.sh          nyalakan
 #   scripts/dev.sh stop     matikan api, worker, tunnel (Docker dibiarkan)

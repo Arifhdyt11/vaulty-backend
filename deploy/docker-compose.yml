@@ -1,4 +1,4 @@
-# Vaulty di sipantas (~/apps/vaulty): backend v2 (api, worker, migrate, redis) dan web dalam satu
+# Vaulty di ylabs (~/apps/vaulty): backend v2 (api, worker, migrate, redis) dan web dalam satu
 # project. Image dibuild di Mac lalu dikirim (docker save | ssh docker load); server tidak build.
 # - backend: vaulty-backend/scripts/deploy.sh (menyalin compose ini ke server).
 # - web: vaulty-frontend/scripts/deploy.sh (hanya kirim image lalu buat ulang service web).
