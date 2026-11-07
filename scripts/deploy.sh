@@ -3,7 +3,7 @@
 # jalankan ulang api + worker. Server tidak build Go (RAM 2 GB).
 #   scripts/deploy.sh            # build + kirim + migrate + up
 #   HOST=sipantas scripts/deploy.sh
-# Prasyarat di server: ~/apps/vaulty/app.env (lihat deploy/app.env.example).
+# Prasyarat di server: ~/apps/vaulty/.env.backend (lihat deploy/.env.backend.example).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,7 +23,7 @@ scp -q deploy/docker-compose.yml "$HOST:$REMOTE_DIR/docker-compose.yml"
 ssh "$HOST" bash -s <<EOF
 set -euo pipefail
 cd "$REMOTE_DIR"
-test -f app.env || { echo "app.env belum ada di ~/$REMOTE_DIR"; exit 1; }
+test -f .env.backend || { echo ".env.backend belum ada di ~/$REMOTE_DIR"; exit 1; }
 echo "==> redis"
 docker compose up -d redis
 echo "==> migrate"

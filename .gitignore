@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!deploy/.env.backend.example
 bin/
 storage/
 *.pem
