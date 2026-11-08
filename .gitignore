@@ -2,8 +2,8 @@
 .env.*
 !.env.example
 !deploy/ylabs/.env.backend.example
-bin/
-storage/
+/bin/
+/storage/
 *.pem
 *.p8
 *.p12
