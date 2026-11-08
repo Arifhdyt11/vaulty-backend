@@ -1,15 +1,15 @@
 # Vaulty di ylabs (~/apps/vaulty): backend v2 (api, worker, migrate, redis) dan web dalam satu
-# project. Image dibuild di Mac lalu dikirim (docker save | ssh docker load); server tidak build.
-# - backend: vaulty-backend/scripts/deploy.sh (menyalin compose ini ke server).
-# - web: vaulty-frontend/scripts/deploy.sh (hanya kirim image lalu buat ulang service web).
+# project. Image dibuild di server dari GitHub (source di ~/apps/vaulty/src) lewat
+# `vaulty/scripts/deploy-ylabs.sh` → remote-build.sh → remote-deploy.sh; tag image dari .env.tag
+# (`docker compose --env-file .env.tag ...`). Cadangan BUILD=local: build di Mac, docker save | ssh.
 # DB `vaulty2` di shared-postgres (network data), AI lewat hermes + 9router (network web).
-# Publik hanya lewat nginx: vaulty.conf → vaulty-api:8080 (port 8080) dan vaulty-web.conf
-# (https://vaulty.reepzs.site: /api/ → vaulty-api:8080, sisanya → vaulty-web:3000).
-# Env di .env.backend (chmod 600, tidak di-commit; lihat deploy/.env.backend.example).
+# Publik hanya lewat nginx (nginx/*.conf, dipasang remote-deploy.sh): vaulty.conf → vaulty-api:8080
+# (port 8080) dan vaulty-web.conf (https://vaulty.reepzs.site: /api/ → vaulty-api:8080, sisanya → vaulty-web:3000).
+# Env di .env.backend (chmod 600, tidak di-commit; lihat .env.backend.example).
 name: vaulty
 
 x-app: &app
-  image: vaulty-backend:v2
+  image: vaulty-backend:${VAULTY_TAG:-latest}
   restart: unless-stopped
   env_file: .env.backend
   # secrets/ (chmod 700, tidak di-commit) berisi service account FCM. Mount folder,
@@ -50,7 +50,7 @@ services:
     networks: [internal]
 
   web:
-    image: vaulty-frontend:latest
+    image: vaulty-frontend:${VAULTY_TAG:-latest}
     container_name: vaulty-web
     restart: unless-stopped
     # Heap Node dibatasi 96 MB di Dockerfile.

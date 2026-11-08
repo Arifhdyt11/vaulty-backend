@@ -1,5 +1,5 @@
 # Satu image untuk api, worker, dan migrate (ADR-002): `vaulty <api|worker|migrate>`.
-# Go di-cross-compile di platform builder (Mac arm64) supaya build amd64 tidak lewat emulasi.
+# Go di-cross-compile di platform builder (server amd64, atau Mac arm64 untuk BUILD=local) tanpa emulasi.
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
